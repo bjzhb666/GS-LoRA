@@ -44,7 +44,7 @@ def load_bin(path, image_size=[112,112]):
 
 def get_val_pair(path, name):
     ver_path = os.path.join(path,name + ".bin")
-    print(ver_path)
+    print('ver_path', ver_path)
     assert os.path.exists(ver_path)
     data_set, issame = load_bin(ver_path)
     print('ver', name)
@@ -301,3 +301,7 @@ def train_accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
 
     return res[0]
+
+if __name__ == '__main__':
+    vers=get_val_data(data_path='./eval/',targets=['lfw'])
+    embed()

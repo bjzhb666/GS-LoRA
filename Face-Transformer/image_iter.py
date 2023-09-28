@@ -82,10 +82,10 @@ class FaceDataset(data.Dataset):
 
 
 if __name__ == '__main__':
-    root = '/raid/Data/faces_webface_112x112/train.rec'
+    root = './data/faces_webface_112x112/train.rec'
     embed()
     dataset = FaceDataset(path_imgrec =root, rand_mirror = False)
     trainloader = data.DataLoader(dataset, batch_size=32, shuffle=True, num_workers=2, drop_last=False)
-    print(len(dataset))
+    print(len(dataset)) # 490623
     for data, label in trainloader:
-        print(data.shape, label)
+        print(data.shape, label) # torch.Size([32, 3, 112, 112]) torch.Size([32])

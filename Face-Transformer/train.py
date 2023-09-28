@@ -15,7 +15,7 @@ from util.utils import get_val_data, perform_val, get_time, buffer_val, AverageM
 import time
 from vit_pytorch_face import ViT_face
 from vit_pytorch_face import ViTs_face
-from IPython import embed
+# from IPython import embed
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 
@@ -85,6 +85,8 @@ if __name__ == '__main__':
                         help='patience epochs for Plateau LR scheduler (default: 10')
     parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
                         help='LR decay rate (default: 0.1)')
+    parser.add_argument('--num_workers', type=int, default=4, metavar='N',
+                        help='dataloader threads (default: 4)')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -111,6 +113,7 @@ if __name__ == '__main__':
     GPU_ID = cfg['GPU_ID'] # specify your GPU ids
     print('GPU_ID', GPU_ID)
     TARGET = cfg['TARGET']
+    WORKERS = cfg['WORKERS']
     print("=" * 60)
     print("Overall Configurations:")
     print(cfg)
@@ -119,7 +122,7 @@ if __name__ == '__main__':
     print("=" * 60)
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
-    wandb.init(project="forget learning", group="face recognition")
+    wandb.init(project="face recognition")
     wandb.config.update(cfg)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
     torch.backends.cudnn.benchmark = True
@@ -129,7 +132,7 @@ if __name__ == '__main__':
     assert h == INPUT_SIZE[0] and w == INPUT_SIZE[1]
 
     dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
-    trainloader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=len(GPU_ID), drop_last=True)
+    trainloader = torch.utils.data.DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=WORKERS, drop_last=True)
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
 
@@ -203,7 +206,7 @@ if __name__ == '__main__':
 
     #======= train & validation & save checkpoint =======#
     DISP_FREQ = 10 # frequency to display training loss & acc
-    VER_FREQ = 20
+    VER_FREQ = 20 # frequency to perform validation
 
     batch = 0  # batch index
 
@@ -223,7 +226,9 @@ if __name__ == '__main__':
             # compute output
             inputs = inputs.to(DEVICE)
             labels = labels.to(DEVICE).long()
-
+            # print("inputs", inputs.shape, inputs.dtype)
+            # print("labels", labels.shape, labels.dtype)
+            # print("labels", labels)
             outputs, emb = BACKBONE(inputs.float(), labels)
             loss = LOSS(outputs, labels)
 
@@ -283,8 +288,14 @@ if __name__ == '__main__':
                         torch.save(BACKBONE.module.state_dict(), os.path.join(WORK_PATH, "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth".format(BACKBONE_NAME, epoch + 1, batch + 1, get_time())))
                     else:
                         torch.save(BACKBONE.state_dict(), os.path.join(WORK_PATH, "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth".format(BACKBONE_NAME, epoch + 1, batch + 1, get_time())))
+                    # set the maximum checkpoint numbers to keep
+                    if len(os.listdir(WORK_PATH)) >= 6:
+                        checkpoints = list(filter(lambda f: f.endswith('.pth'), os.listdir(WORK_PATH)))
+                        checkpoints.sort(key=lambda f: os.path.getmtime(os.path.join(WORK_PATH, f)))
+                        os.remove(os.path.join(WORK_PATH, checkpoints[0]))
                 BACKBONE.train()  # set to training mode
 
             batch += 1 # batch index
 
-
+    wandb.run.name = args.net + args.data_mode + args.head + str(args.lr) + 'bs' \
+        +str(args.batch_size) + 'ep' + str(args.num_epoch)

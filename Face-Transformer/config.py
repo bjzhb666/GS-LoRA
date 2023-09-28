@@ -27,9 +27,12 @@ def get_config(args):
 
     configuration['NUM_EPOCH'] = args.epochs
     configuration['BATCH_SIZE'] = args.batch_size
-
+    configuration['WORKERS'] = args.num_workers
+    
     if args.data_mode == 'retina':
         configuration['DATA_ROOT'] = './Data/ms1m-retinaface-t1/'
+    elif args.data_mode == 'casia':
+        configuration['DATA_ROOT'] = './data/faces_webface_112x112/'
     else:
         raise Exception(args.data_mode)
     configuration['EVAL_PATH'] = './eval/'
