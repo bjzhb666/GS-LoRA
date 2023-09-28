@@ -7,7 +7,7 @@ from torch.nn import Parameter
 from IPython import embed
 import math
 MIN_NUM_PATCHES = 16
-
+import loralib as lora
 class Softmax(nn.Module):
     r"""Implement of Softmax (normal classification head):
         Args:
@@ -271,13 +271,13 @@ class PreNorm(nn.Module):
         return self.fn(self.norm(x), **kwargs)
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, hidden_dim, dropout = 0.):
+    def __init__(self, dim, hidden_dim, dropout = 0., lora_rank = 8):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(dim, hidden_dim),
+            lora.Linear(dim, hidden_dim, r=lora_rank),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, dim),
+            lora.Linear(hidden_dim, dim, r=lora_rank),
             nn.Dropout(dropout)
         )
     def forward(self, x):
@@ -320,13 +320,13 @@ class Attention(nn.Module):
         return out
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
                 Residual(PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout))),
-                Residual(PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout)))
+                Residual(PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout, lora_rank=lora_rank)))
             ]))
     def forward(self, x, mask = None):
         for attn, ff in self.layers:
@@ -338,7 +338,7 @@ class Transformer(nn.Module):
 
 class ViTs_face(nn.Module):
     def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, ac_patch_size,
-                         pad, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0.):
+                         pad, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank = 8):
         super().__init__()
         assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
         num_patches = (image_size // patch_size) ** 2
@@ -355,7 +355,7 @@ class ViTs_face(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank)
 
         self.pool = pool
         self.to_latent = nn.Identity()

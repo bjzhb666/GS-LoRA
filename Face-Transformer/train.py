@@ -18,7 +18,7 @@ from vit_pytorch_face import ViTs_face
 # from IPython import embed
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
-
+import loralib as lora
 
 def need_save(acc, highest_acc):
     do_save = False
@@ -35,6 +35,11 @@ def need_save(acc, highest_acc):
         do_save = True
     print("highest_acc:", highest_acc)
     return do_save
+
+
+def count_trainable_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params
 
 
 if __name__ == '__main__':
@@ -87,6 +92,20 @@ if __name__ == '__main__':
                         help='LR decay rate (default: 0.1)')
     parser.add_argument('--num_workers', type=int, default=4, metavar='N',
                         help='dataloader threads (default: 4)')
+
+    # lora rank on FFN of Transformer blocks
+    parser.add_argument(
+        '--lora_rank',
+        type=int,
+        default=8,
+        metavar='N',
+        help='lora rank on FFN of Transformer blocks (default: 8)')
+    # wandb offline
+    parser.add_argument(
+        '--wandb_offline',
+        default=False,
+        action='store_true',
+    )
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -122,7 +141,7 @@ if __name__ == '__main__':
     print("=" * 60)
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
-    wandb.init(project="face recognition")
+    wandb.init(project="face recognition", mode="offline" if args.wandb_offline else "online")
     wandb.config.update(cfg)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
     torch.backends.cudnn.benchmark = True
@@ -152,7 +171,8 @@ if __name__ == '__main__':
                          heads=8,
                          mlp_dim=2048,
                          dropout=0.1,
-                         emb_dropout=0.1
+                         emb_dropout=0.1,
+                         lora_rank=args.lora_rank
                      ),
                      'VITs': ViTs_face(
                          loss_type=HEAD_NAME,
@@ -167,7 +187,8 @@ if __name__ == '__main__':
                          heads=8,
                          mlp_dim=2048,
                          dropout=0.1,
-                         emb_dropout=0.1
+                         emb_dropout=0.1,
+                         lora_rank=args.lora_rank
                      )}
     BACKBONE = BACKBONE_DICT[BACKBONE_NAME]
     print("=" * 60)
@@ -196,6 +217,20 @@ if __name__ == '__main__':
             print("No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch".format(BACKBONE_RESUME_ROOT))
         print("=" * 60)
 
+    if args.lora_rank > 0:
+        lora.mark_only_lora_as_trainable(BACKBONE)
+        print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
+    else:
+        print("Do not use LoRA in Transformer FFN, train all parameters.") # 68631040
+    # 统计BACKBONE的可训练参数量
+    learnable_parameters = count_trainable_parameters(BACKBONE)
+    print("learnable_parameters", learnable_parameters) # 819200
+    print("ratio of learnable_parameters", learnable_parameters/68631040) # 0.011938
+    wandb.log({"learnable_parameters": learnable_parameters,
+               'ratio of learnable_parameters': learnable_parameters/68631040,
+               'lora_rank': args.lora_rank})
+    # exit()
+
     if MULTI_GPU:
         # multi-GPU setting
         BACKBONE = nn.DataParallel(BACKBONE, device_ids = GPU_ID)
@@ -215,8 +250,11 @@ if __name__ == '__main__':
 
 
     BACKBONE.train()  # set to training mode
+
+
+
     for epoch in range(NUM_EPOCH): # start training process
-        
+
         lr_scheduler.step(epoch)
 
         last_time = time.time()
@@ -244,7 +282,7 @@ if __name__ == '__main__':
             OPTIMIZER.zero_grad()
             loss.backward()
             OPTIMIZER.step()
-            
+
             # dispaly training loss & acc every DISP_FREQ (buffer for visualization)
             if ((batch + 1) % DISP_FREQ == 0) and batch != 0:
                 epoch_loss = losses.avg

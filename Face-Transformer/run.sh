@@ -1,7 +1,7 @@
 export CUDA_VISIBLE_DEVICES=4,5,6,7
 python3 -u train.py -b 480 -w 0,1,2,3 -d casia -n VIT \
 -head CosFace --outdir ./results/train/ViT-P8S8_casia_cosface_s1 \
---warmup-epochs 1 --lr 3e-4 --num_workers 8 -t lfw
+--warmup-epochs 1 --lr 3e-4 --num_workers 8 -t lfw --wandb_offline --lora_rank 8
 # python3 -u train.py -b 80 -w 0 -d casia \
 # -n VITs -head CosFace --outdir ./results/ViT-P12S8_casia_cosface_s1 \
 # --warmup-epochs 1 --lr 5e-5  --num_workers 8 -t lfw,sllfw
