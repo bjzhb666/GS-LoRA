@@ -1,0 +1,10 @@
+__pycache__
+*.pth
+/data
+*.pyc
+/exps
+*.sh
+/tests
+*.ipynb_checkpoints
+*.ipynb
+gpu.py
