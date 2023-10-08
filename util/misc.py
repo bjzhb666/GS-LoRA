@@ -572,4 +572,21 @@ def log_wandb(args, array, name, epoch):
                 'allARlarge': all_maps[11],
                 'epoch': epoch,
             })
+        elif name == 'old':
+            old_maps = array
+            wandb.log({
+                'oldAP0.5~0.95': old_maps[0],
+                'oldAP0.5': old_maps[1],
+                'oldAP0.75': old_maps[2],
+                'oldAPsmall': old_maps[3],
+                'oldAPmedium': old_maps[4],
+                'oldAPlarge': old_maps[5],
+                'oldAR0.5~0.95': old_maps[6],
+                'oldAR0.5': old_maps[7],
+                'oldAR0.75': old_maps[8],
+                'oldARsmall': old_maps[9],
+                'oldARmedium': old_maps[10],
+                'oldARlarge': old_maps[11],
+                'epoch': epoch,
+            })
 
