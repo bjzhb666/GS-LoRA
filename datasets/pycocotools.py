@@ -393,16 +393,16 @@ class COCO:
             pass
         else:
             if tfs_or_tfh == 'tfh':
-                if phase_idx == 0:
+                if phase_idx == 0: # remain dataset
                     selected_cls_this_phase = cls_order[:args.num_of_first_cls]
-                else:
+                else: # phase_idx == 1, forget datset
                     if incremental_val:
                         if val_each_phase:
-                            selected_cls_this_phase = cls_order[(phase_idx-1)*cls_per_phase+args.num_of_first_cls:(phase_idx)*cls_per_phase+args.num_of_first_cls]
+                            selected_cls_this_phase = cls_order[args.this_task_start_cls:args.this_task_end_cls]
                         else:
-                            selected_cls_this_phase = cls_order[:(phase_idx)*cls_per_phase+args.num_of_first_cls]
-                    else:
-                        selected_cls_this_phase = cls_order[(phase_idx-1)*cls_per_phase+args.num_of_first_cls:(phase_idx)*cls_per_phase+args.num_of_first_cls]
+                            selected_cls_this_phase = cls_order[args.this_task_start_cls:]
+                    else: # incremental_train
+                        selected_cls_this_phase = cls_order[args.this_task_start_cls:args.this_task_end_cls]
 
             else:
                 raise ValueError('Please set the correct data setting.')

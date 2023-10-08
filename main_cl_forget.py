@@ -22,7 +22,7 @@ import loralib as lora
 from collections import OrderedDict
 import util.cal_norm as cal_norm
 import torch.distributed as dist
-from baselines import random_drop
+from baselines.random_drop import random_drop_weights
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Deformable DETR Detector',
@@ -308,9 +308,9 @@ def get_args_parser():
     parser.add_argument('--manual_order', default=False, action='store_true')
     
     # continual learning args
-    parser.add_argument('--num_tasks', default=1, type=int)
+    parser.add_argument('--num_tasks', type=int)
     parser.add_argument('this_task_start_cls', default=0, type=int)
-    parser.add_argument('this_task_end_cls', default=40, type=int)
+    parser.add_argument('this_task_end_cls', default=0, type=int)
 
     return parser
 
@@ -383,7 +383,6 @@ def main(args):
                     phase_idx=1, incremental=True, incremental_val=True, val_each_phase=True)    
         if task_i > 0:
             # val already forget dataset in the previous tasks: 60-10-10(last 10 is forget in the previous tasks)
-            
             args.this_task_start_cls = origin_first_task_cls - (task_i - 1) * args.cls_per_phase 
             dataset_val_old = build_dataset(image_set='val', args=args, cls_order=cls_order, \
                         phase_idx=1, incremental=True, incremental_val=True, val_each_phase=False, is_rehearsal=True)
@@ -397,6 +396,9 @@ def main(args):
                     dataset_val_forget, shuffle=False)
                 sampler_val_remain = samplers.NodeDistributedSampler(
                     dataset_val_remain, shuffle=False)
+                if task_i > 0:
+                    sampler_val_old = samplers.NodeDistributedSampler(
+                        dataset_val_old, shuffle=False)
             else:
                 sampler_forget = samplers.DistributedSampler(dataset_forget)
                 sampler_remain = samplers.DistributedSampler(dataset_remain)
@@ -404,6 +406,9 @@ def main(args):
                     dataset_val_forget, shuffle=False)
                 sampler_val_remain = samplers.DistributedSampler(
                     dataset_val_remain, shuffle=False)
+                if task_i > 0:
+                    sampler_val_old = samplers.DistributedSampler(
+                        dataset_val_old, shuffle=False)
         else:
             sampler_forget = torch.utils.data.RandomSampler(dataset_forget)
             sampler_remain = torch.utils.data.RandomSampler(dataset_remain)
@@ -411,6 +416,9 @@ def main(args):
                 dataset_val_forget)
             sampler_val_remain = torch.utils.data.SequentialSampler(
                 dataset_val_remain)
+            if task_i > 0:
+                sampler_val_old = torch.utils.data.SequentialSampler(
+                    dataset_val_old)
 
         batch_sampler_forget = torch.utils.data.BatchSampler(sampler_forget,
                                                             args.batch_size,
@@ -435,7 +443,10 @@ def main(args):
         data_loader_val_remain = DataLoader(dataset_val_remain, batch_size=args.batch_size, \
                                             sampler=sampler_val_remain, drop_last=False,\
                                             collate_fn=utils.collate_fn, num_workers=args.num_workers, pin_memory=True)
-
+        if task_i > 0:
+            data_loader_val_old = DataLoader(dataset_val_old, batch_size=args.batch_size, \
+                                            sampler=sampler_val_old, drop_last=False,\
+                                            collate_fn=utils.collate_fn, num_workers=args.num_workers, pin_memory=True)
         def match_name_keywords(n, name_keywords):
             out = False
             for b in name_keywords:
@@ -514,6 +525,8 @@ def main(args):
 
         base_ds_forget = get_coco_api_from_dataset(dataset_val_forget)
         base_ds_remain = get_coco_api_from_dataset(dataset_val_remain)
+        if task_i > 0:
+            base_ds_old = get_coco_api_from_dataset(dataset_val_old)
 
         if args.frozen_weights is not None:
             checkpoint = torch.load(args.frozen_weights, map_location='cpu')
@@ -565,7 +578,7 @@ def main(args):
                     if len(unexpected_keys) > 0:
                         print('Unexpected Keys: {}'.format(unexpected_keys))
                     
-                    # TODO:really need???  load lora weights
+                    # TODO:really need???  load lora weights or reintialize lora weights???
                     if args.resume_lora is not None:
                         last_checkpoint_path_lora = args.output_dir + 'chechpoint_lora_task_' + str(task_i)
                         lora_checkpoint = torch.load(last_checkpoint_path_lora,
@@ -578,24 +591,30 @@ def main(args):
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_forget,
                     base_ds_forget, device, args.output_dir)
-                utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=0)
+                utils.log_wandb(args=args,array=forget_maps,task_i='resumed-eval',name='forget', epoch=0)
                 print("Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_remain,
                     base_ds_remain, device, args.output_dir)
-                utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=0)
+                utils.log_wandb(args=args,array=remain_maps,task_i='resumed-eval', name='remain',epoch=0)
+                if task_i > 0:
+                    print("Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i='resumed-eval', epoch=0)
         if args.eval:
             print("Testing for forget classes")
             test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                 model, criterion, postprocessors, data_loader_val_forget,
                 base_ds_forget, device, args.output_dir)
-            utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=0)
+            utils.log_wandb(args=args,array=forget_maps,name='forget', task_i='eval', epoch=0)
 
             print("Testing for remain classes")
             test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                 model, criterion, postprocessors, data_loader_val_remain,
                 base_ds_remain, device, args.output_dir)
-            utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=0)
+            utils.log_wandb(args=args,array=remain_maps,name='remain',task_i='eval', epoch=0)
             return
         
         if args.one_stage:
@@ -619,13 +638,20 @@ def main(args):
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_forget,
                     base_ds_forget, device, args.output_dir)
-                utils.log_wandb(args=args,array=forget_maps,name='forget',epoch=epoch+1)
+                utils.log_wandb(args=args,array=forget_maps,name='forget',task_i=task_i, epoch=epoch+1)
                 print("One stage training. Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_remain,
                     base_ds_remain, device, args.output_dir)
-                utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=epoch+1)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=epoch+1)
 
+                if task_i > 0:
+                    print("One stage training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=epoch+1)
+                    
                 if args.output_dir:
                     checkpoint_paths = [output_dir / 'checkpoint_task_'+ str(task_i) + '.pth']
                     checkpoint_paths_lora = [output_dir / 'checkpoint_lora_task_' + str(task_i) + '.pth']
@@ -655,7 +681,6 @@ def main(args):
             if args.rank == 0:
                 wandb.log({'lora_norm_list': norm_list})
             
-            return
 
         if args.rehearsal_training:
             print("start directly rehearsal training")
@@ -678,19 +703,25 @@ def main(args):
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_forget,
                     base_ds_forget, device, args.output_dir)
-                utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=remain_epoch+1)
+                utils.log_wandb(args=args,array=forget_maps,name='forget', task_i=task_i, epoch=remain_epoch+1)
                 print("Directly Rehearsal training. Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_remain,
                     base_ds_remain, device, args.output_dir)
-                utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=remain_epoch+1)
-
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=remain_epoch+1)
+                if task_i > 0:
+                    print("Directly Rehearsal training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=remain_epoch+1)
+            
             total_time = time.time() - start_time
             total_time_str = str(datetime.timedelta(seconds=int(total_time)))
             print('Training time {}'.format(total_time_str))
             if dist.get_rank() == 0:
                 wandb.log({'time': total_time_str})
-            return
+
 
         if args.finetune_gradient_ascent:
             print("start gradient ascent training")
@@ -713,114 +744,132 @@ def main(args):
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_forget,
                     base_ds_forget, device, args.output_dir)
-                utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=forget_epoch+1)
+                utils.log_wandb(args=args,array=forget_maps,name='forget',task_i=task_i,  epoch=forget_epoch+1)
                 print("Gradient ascent training. Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model, criterion, postprocessors, data_loader_val_remain,
                     base_ds_remain, device, args.output_dir)
-                utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=forget_epoch+1)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=forget_epoch+1)
 
+                if task_i > 0:
+                    print("Gradient ascent training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=forget_epoch+1)
+            
             total_time = time.time() - start_time
             total_time_str = str(datetime.timedelta(seconds=int(total_time)))
             print('Training time {}'.format(total_time_str))
             if dist.get_rank() == 0:
                 wandb.log({'time': total_time_str})
-            return
         
         if args.random_drop:
-            dropped_model = random_drop(model, args.random_drop_rate)
+            dropped_model = random_drop_weights(model_without_ddp)
+        
+            if args.distributed:
+                dropped_ddp_model = torch.nn.parallel.DistributedDataParallel(
+                dropped_model, device_ids=[args.gpu])
+            
             print("Random drop. Testing for forget classes")
             test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
-                dropped_model, criterion, postprocessors, data_loader_val_forget,
+                dropped_ddp_model, criterion, postprocessors, data_loader_val_forget,
                 base_ds_forget, device, args.output_dir)
-            utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=0)
+            utils.log_wandb(args=args,array=forget_maps,name='forget',task_i=task_i, epoch=0)
             print("Random drop. Testing for remain classes")
             test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
-                dropped_model, criterion, postprocessors, data_loader_val_remain,
+                dropped_ddp_model, criterion, postprocessors, data_loader_val_remain,
                 base_ds_remain, device, args.output_dir)
-            utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=0)
-            return
+            utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=0)
+            if task_i > 0:
+                print("Random drop. Testing for old classes")
+                test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                    dropped_ddp_model, criterion, postprocessors, data_loader_val_old,
+                    base_ds_old, device, args.output_dir)
+                utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=0)
+            
+        
+        else:
+            print("start two stage training")
+            start_time = time.time()
 
-        print("start training")
-        start_time = time.time()
+            forget_epoch = 0
 
-        forget_epoch = 0
+            for forget_epoch in range(args.epochs):
+                if args.distributed:
+                    sampler_forget.set_epoch(forget_epoch)
+                train_stats = train_one_epoch(model,
+                                            criterion,
+                                            data_loader_forget,
+                                            optimizer_forget,
+                                            device,
+                                            forget_epoch,
+                                            args.clip_max_norm,
+                                            ascent=True)
+                lr_scheduler_forget.step()
 
-        for forget_epoch in range(args.epochs):
-            if args.distributed:
-                sampler_forget.set_epoch(forget_epoch)
-            train_stats = train_one_epoch(model,
-                                        criterion,
-                                        data_loader_forget,
-                                        optimizer_forget,
-                                        device,
-                                        forget_epoch,
-                                        args.clip_max_norm,
-                                        ascent=True)
-            lr_scheduler_forget.step()
+                print("Forget training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_forget,
+                    base_ds_forget, device, args.output_dir)
+                utils.log_wandb(args=args,array=forget_maps,name='forget', task_i=task_i, epoch=forget_epoch+1)
+                print("Forget training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_remain,
+                    base_ds_remain, device, args.output_dir)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=forget_epoch+1)
 
-            print("Forget training. Testing for forget classes")
-            test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
-                model, criterion, postprocessors, data_loader_val_forget,
-                base_ds_forget, device, args.output_dir)
-            utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=forget_epoch+1)
-            print("Forget training. Testing for remain classes")
-            test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
-                model, criterion, postprocessors, data_loader_val_remain,
-                base_ds_remain, device, args.output_dir)
-            utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=forget_epoch+1)
+            # rehearsal training
+            remain_epoch = 0
+            for remain_epoch in range(args.rehearsal_epoch):
+                if args.distributed:
+                    sampler_remain.set_epoch(remain_epoch)
+                train_stats = train_one_epoch(model,
+                                            criterion,
+                                            data_loader_remain,
+                                            optimizer_remain,
+                                            device,
+                                            remain_epoch,
+                                            args.clip_max_norm,
+                                            ascent=False)
+                lr_scheduler_remain.step()
 
-        # rehearsal training
-        remain_epoch = 0
-        for remain_epoch in range(args.rehearsal_epoch):
-            if args.distributed:
-                sampler_remain.set_epoch(remain_epoch)
-            train_stats = train_one_epoch(model,
-                                        criterion,
-                                        data_loader_remain,
-                                        optimizer_remain,
-                                        device,
-                                        remain_epoch,
-                                        args.clip_max_norm,
-                                        ascent=False)
-            lr_scheduler_remain.step()
+                print("Rehearsal training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_forget,
+                    base_ds_forget, device, args.output_dir)
+                utils.log_wandb(args=args,array=forget_maps,name='forget', task_i=task_i, epoch=remain_epoch+1)
+                print("Rehearsal training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_remain,
+                    base_ds_remain, device, args.output_dir)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=remain_epoch+1)
 
-            print("Rehearsal training. Testing for forget classes")
-            test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
-                model, criterion, postprocessors, data_loader_val_forget,
-                base_ds_forget, device, args.output_dir)
-            utils.log_wandb(args=args,array=forget_maps,name='forget', epoch=remain_epoch+1)
-            print("Rehearsal training. Testing for remain classes")
-            test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
-                model, criterion, postprocessors, data_loader_val_remain,
-                base_ds_remain, device, args.output_dir)
-            utils.log_wandb(args=args,array=remain_maps,name='remain',epoch=remain_epoch+1)
+            if args.output_dir:
+                checkpoint_paths = [output_dir / 'checkpoint.pth']
+                checkpoint_paths_lora = [output_dir / 'checkpoint_lora.pth']
+                # print(checkpoint_paths, checkpoint_paths_lora)
+                for checkpoint_path in checkpoint_paths:
+                    utils.save_on_master(
+                        {
+                            'model': model_without_ddp.state_dict(),
+                            'optimizer_forget': optimizer_forget.state_dict(),
+                            'lr_scheduler_forget': lr_scheduler_forget.state_dict(),
+                            'optimizer_remain': optimizer_remain.state_dict(),
+                            'lr_scheduler_remain': lr_scheduler_remain.state_dict(),
+                            'epoch': forget_epoch,
+                            'remain_epoch': remain_epoch,
+                            'args': args,
+                        }, checkpoint_path)
 
-        if args.output_dir:
-            checkpoint_paths = [output_dir / 'checkpoint.pth']
-            checkpoint_paths_lora = [output_dir / 'checkpoint_lora.pth']
-            # print(checkpoint_paths, checkpoint_paths_lora)
-            for checkpoint_path in checkpoint_paths:
-                utils.save_on_master(
-                    {
-                        'model': model_without_ddp.state_dict(),
-                        'optimizer_forget': optimizer_forget.state_dict(),
-                        'lr_scheduler_forget': lr_scheduler_forget.state_dict(),
-                        'optimizer_remain': optimizer_remain.state_dict(),
-                        'lr_scheduler_remain': lr_scheduler_remain.state_dict(),
-                        'epoch': forget_epoch,
-                        'remain_epoch': remain_epoch,
-                        'args': args,
-                    }, checkpoint_path)
+                for checkpoint_path_lora in checkpoint_paths_lora:
+                    utils.save_on_master(
+                        {'lora': OrderedDict(lora.lora_state_dict(model_without_ddp))},
+                        checkpoint_path_lora)
 
-            for checkpoint_path_lora in checkpoint_paths_lora:
-                utils.save_on_master(
-                    {'lora': OrderedDict(lora.lora_state_dict(model_without_ddp))},
-                    checkpoint_path_lora)
-
-        total_time = time.time() - start_time
-        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-        print('Training time {}'.format(total_time_str))
+            total_time = time.time() - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print('Training time {}'.format(total_time_str))
 
         return
    
