@@ -578,13 +578,9 @@ def main(args):
                     if len(unexpected_keys) > 0:
                         print('Unexpected Keys: {}'.format(unexpected_keys))
                     
-                    # TODO:really need???  load lora weights or reintialize lora weights???
-                    if args.resume_lora is not None:
-                        last_checkpoint_path_lora = args.output_dir + 'chechpoint_lora_task_' + str(task_i)
-                        lora_checkpoint = torch.load(last_checkpoint_path_lora,
-                                                    map_location='cpu')
-                        model_without_ddp.load_state_dict(lora_checkpoint['lora'],
-                                                    strict=False)  
+                    # reintialize lora weights
+                    utils.reinitialize_lora_parameters(model_without_ddp)
+                    # import pdb; pdb.set_trace()
             # check the resumed model
             if not args.eval:
                 print("Testing for forget classes")
@@ -679,7 +675,7 @@ def main(args):
             # get the norm of the lora model for visualization
             norm_list = cal_norm.get_norm_of_lora(model_without_ddp)
             if args.rank == 0:
-                wandb.log({'lora_norm_list': norm_list})
+                wandb.log({'lora_norm_list-task'+str(task_i): norm_list})
             
 
         if args.rehearsal_training:
@@ -789,7 +785,7 @@ def main(args):
                 utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=0)
             
         
-        else:
+        else: # two stage training
             print("start two stage training")
             start_time = time.time()
 

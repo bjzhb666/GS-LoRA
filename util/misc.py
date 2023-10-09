@@ -17,7 +17,7 @@ import torch.distributed as dist
 from torch import Tensor
 
 import wandb
-
+import math
 # needed due to empty tensor bug in pytorch and torchvision 0.5
 import torchvision
 '''
@@ -590,3 +590,15 @@ def log_wandb(args, array, name, task_i, epoch):
                 'epoch': epoch,
             })
 
+def reinitialize_lora_parameters(model):
+    # 取消梯度计算
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if 'lora' in name:
+                if isinstance(param, nn.Parameter):
+                    if 'lora_A' in name:
+                        nn.init.kaiming_uniform_(param, a=math.sqrt(50))
+                    elif 'lora_B' in name:
+                        nn.init.zeros_(param)
+                else:
+                    raise ValueError(f"Parameter {name} is not an instance of nn.Parameter.")

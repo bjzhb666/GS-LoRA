@@ -1,18 +1,21 @@
 import torch
-import torch.nn as nn
 import random
 
+def random_drop_weights(model):
+    # 遍历模型的每个参数
+    for name, param in model.named_parameters():
+        random_drop_rate = random.random() * 0.2
+        if 'embedding' in name:
+            # 对于Embedding层的参数，直接随机置零
+            shape = param.data.shape
+            num_zeros = int(random_drop_rate * shape.numel())
+            zero_indices = random.sample(range(shape.numel()), num_zeros)
+            param.data.view(-1)[zero_indices] = 0
+        else:
+            # 对于其他参数，按照原来的逻辑处理
+            shape = param.data.shape
+            num_zeros = int(random_drop_rate * shape.numel())
+            zero_indices = random.sample(range(shape.numel()), num_zeros)
+            param.data.view(-1)[zero_indices] = 0
 
-def random_drop_weights(model, drop_probability):
-    if isinstance(model, nn.DataParallel) or isinstance(model, nn.parallel.DistributedDataParallel):
-        model_without_parallel = model.module
-        random_drop_weights(model_without_parallel, drop_probability)
-    else:
-        for name, module in model.named_children():
-            if isinstance(module, nn.Module):
-                random_drop_weights(module, drop_probability)
-            elif isinstance(module, nn.Parameter):
-                if torch.is_tensor(module.data):
-                    if random.random() < drop_probability:
-                        module.data *= 0
     return model
