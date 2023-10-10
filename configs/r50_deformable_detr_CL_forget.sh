@@ -5,5 +5,5 @@ set -x
 # EXP_DIR=exps/r50_deformable_detr
 PY_ARGS=${@:1}
 
-python -u main_forget.py \
+python -u main_cl_forget.py \
     ${PY_ARGS}

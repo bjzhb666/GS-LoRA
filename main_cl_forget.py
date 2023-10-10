@@ -309,9 +309,9 @@ def get_args_parser():
     
     # continual learning args
     parser.add_argument('--num_tasks', type=int)
-    parser.add_argument('this_task_start_cls', default=0, type=int)
-    parser.add_argument('this_task_end_cls', default=0, type=int)
-
+    parser.add_argument('--this_task_start_cls', default=0, type=int)
+    parser.add_argument('--this_task_end_cls', default=0, type=int)
+    parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
     return parser
 
 
@@ -331,7 +331,7 @@ def main(args):
     if args.rank == 0:
         wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
         wandb.init(project="forget learning", dir=args.output_dir, \
-                    group="new data cutting", mode="offline" if args.wandb_offline else "online")
+                    group="cl-forget", mode="offline" if args.wandb_offline else "online")
         wandb.config.update(args)
     device = torch.device(args.device)
 
@@ -369,6 +369,9 @@ def main(args):
     origin_first_task_cls = args.num_of_first_cls
     for task_i in range(args.num_tasks): # start from 0
         # modify num_of_first_cls according to task id
+        print('\n')
+        print('*****************task_i:', task_i,'***********************')
+        print('\n')
         args.num_of_first_cls = origin_first_task_cls - task_i * args.cls_per_phase
     
         dataset_remain = build_dataset(image_set='train', args=args, cls_order=cls_order, \
@@ -516,12 +519,13 @@ def main(args):
             optimizer_forget, args.lr_drop, gamma=args.lr_gamma)
         lr_scheduler_remain = torch.optim.lr_scheduler.StepLR(
             optimizer_remain, args.lr_drop_rehearsal, gamma=args.lr_gamma)
-
-        print('pytorch model distributed...')
-        if args.distributed:
-            model = torch.nn.parallel.DistributedDataParallel(
-                model, device_ids=[args.gpu])
-            model_without_ddp = model.module
+        
+        if task_i == 0:
+            print('pytorch model distributed...')
+            if args.distributed:
+                model = torch.nn.parallel.DistributedDataParallel(
+                    model, device_ids=[args.gpu])
+                model_without_ddp = model.module
 
         base_ds_forget = get_coco_api_from_dataset(dataset_val_forget)
         base_ds_remain = get_coco_api_from_dataset(dataset_val_remain)
@@ -564,23 +568,26 @@ def main(args):
                         model_without_ddp.load_state_dict(lora_checkpoint['lora'],
                                                     strict=False)
                 else: # task_i > 0
-                    last_checkpoint_path = args.output_dir + 'chechpoint_task_' + str(task_i)
-                    checkpoint = torch.load(last_checkpoint_path, map_location='cpu')
-                    missing_keys, unexpected_keys = model_without_ddp.load_state_dict(
-                        checkpoint['model'], strict=False)
-                    unexpected_keys = [
-                        k for k in unexpected_keys
-                        if not (k.endswith('total_params') or k.endswith('total_ops'))
-                    ]
+                    if args.one_stage:    
+                        last_checkpoint_path = os.path.join(args.output_dir , ('checkpoint_task_' + str(task_i-1)+'.pth'))
+                        checkpoint = torch.load(last_checkpoint_path, map_location='cpu')
+                        missing_keys, unexpected_keys = model_without_ddp.load_state_dict(
+                            checkpoint['model'], strict=False)
+                        unexpected_keys = [
+                            k for k in unexpected_keys
+                            if not (k.endswith('total_params') or k.endswith('total_ops'))
+                        ]
 
-                    if len(missing_keys) > 0:
-                        print('Missing Keys: {}'.format(missing_keys))
-                    if len(unexpected_keys) > 0:
-                        print('Unexpected Keys: {}'.format(unexpected_keys))
-                    
-                    # reintialize lora weights
-                    utils.reinitialize_lora_parameters(model_without_ddp)
-                    # import pdb; pdb.set_trace()
+                        if len(missing_keys) > 0:
+                            print('Missing Keys: {}'.format(missing_keys))
+                        if len(unexpected_keys) > 0:
+                            print('Unexpected Keys: {}'.format(unexpected_keys))
+                        
+                        # reintialize lora weights
+                        utils.reinitialize_lora_parameters(model_without_ddp)
+                        # import pdb; pdb.set_trace()
+                    else:
+                        pass
             # check the resumed model
             if not args.eval:
                 print("Testing for forget classes")
@@ -649,8 +656,8 @@ def main(args):
                     utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=epoch+1)
                     
                 if args.output_dir:
-                    checkpoint_paths = [output_dir / 'checkpoint_task_'+ str(task_i) + '.pth']
-                    checkpoint_paths_lora = [output_dir / 'checkpoint_lora_task_' + str(task_i) + '.pth']
+                    checkpoint_paths = [output_dir / ('checkpoint_task_'+ str(task_i) + '.pth')]
+                    checkpoint_paths_lora = [output_dir / ('checkpoint_lora_task_' + str(task_i) + '.pth')]
 
                     for checkpoint_path in checkpoint_paths:
                         utils.save_on_master(
@@ -678,7 +685,7 @@ def main(args):
                 wandb.log({'lora_norm_list-task'+str(task_i): norm_list})
             
 
-        if args.rehearsal_training:
+        elif args.rehearsal_training:
             print("start directly rehearsal training")
             start_time = time.time()
             remain_epoch = 0
@@ -719,7 +726,7 @@ def main(args):
                 wandb.log({'time': total_time_str})
 
 
-        if args.finetune_gradient_ascent:
+        elif args.finetune_gradient_ascent:
             print("start gradient ascent training")
             start_time = time.time()
             forget_epoch = 0
@@ -760,7 +767,7 @@ def main(args):
             if dist.get_rank() == 0:
                 wandb.log({'time': total_time_str})
         
-        if args.random_drop:
+        elif args.random_drop:
             dropped_model = random_drop_weights(model_without_ddp)
         
             if args.distributed:
@@ -867,7 +874,7 @@ def main(args):
             total_time_str = str(datetime.timedelta(seconds=int(total_time)))
             print('Training time {}'.format(total_time_str))
 
-        return
+    return
    
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -892,8 +899,7 @@ if __name__ == '__main__':
         #         for i in args.lora_encoder_layers) + 'decoderL' + '-'.join(
         #             str(i) for i in args.lora_decoder_layers)
         if args.one_stage:
-            wandb.run.name = 'forget' + str(args.cls_per_phase) + '-'.join(
-                args.lora_pos) + str(args.lora_rank) + 'struc_alpha' + str(args.alpha)
+            wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-one-stage'
         if args.eval:
             wandb.run.name = 'eval-' + wandb.run.name
         if args.rehearsal_training:
