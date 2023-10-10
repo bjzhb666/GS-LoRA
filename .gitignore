@@ -3,7 +3,7 @@ __pycache__
 /data
 *.pyc
 /exps
-*.sh
+# *.sh
 /tests
 *.ipynb_checkpoints
 *.ipynb
