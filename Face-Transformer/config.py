@@ -33,6 +33,10 @@ def get_config(args):
         configuration['DATA_ROOT'] = './Data/ms1m-retinaface-t1/'
     elif args.data_mode == 'casia':
         configuration['DATA_ROOT'] = './data/faces_webface_112x112/'
+    elif args.data_mode == 'casia100':
+        configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub100/'
+    elif args.data_mode == 'casia1000':
+        configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub1000/'
     else:
         raise Exception(args.data_mode)
     configuration['EVAL_PATH'] = './eval/'
@@ -40,7 +44,7 @@ def get_config(args):
     configuration['BACKBONE_NAME'] = args.net
     assert args.head in ['Softmax', 'ArcFace', 'CosFace', 'SFaceLoss']
     configuration['HEAD_NAME'] = args.head
-    configuration['TARGET'] = [i for i in args.target.split(',')]
+    # configuration['TARGET'] = [i for i in args.target.split(',')]
 
     if args.resume:
         configuration['BACKBONE_RESUME_ROOT'] = args.resume
