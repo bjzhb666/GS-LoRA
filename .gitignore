@@ -1,2 +1,7 @@
 Face-Transformer/data/
 Face-Transformer/eval/
+dataset_test/
+InsightFace_Pytorch/
+Face-Transformer/Fresults/
+Face-Transformer/__pycache__/
+Face-Transformer/wandb/
