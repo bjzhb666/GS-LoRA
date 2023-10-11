@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import sys
-from vit_pytorch import ViT_face
-from vit_pytorch import ViTs_face
+from vit_pytorch_face import ViT_face
+from vit_pytorch_face import ViTs_face
 from util.utils import get_val_data, perform_val
 from IPython import embed
 import sklearn
@@ -17,10 +17,10 @@ def main(args):
     print(args)
     MULTI_GPU = False
     DEVICE = torch.device("cuda:0")
-    DATA_ROOT = '/raid/Data/ms1m-retinaface-t1/'
-    with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
-        NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
-
+    # DATA_ROOT = '/raid/Data/ms1m-retinaface-t1/'
+    # with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
+    #     NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
+    NUM_CLASS = 10572 # CASIA-WebFace
     if args.network == 'VIT' :
         model = ViT_face(
             image_size=112,
@@ -33,7 +33,8 @@ def main(args):
             heads=8,
             mlp_dim=2048,
             dropout=0.1,
-            emb_dropout=0.1
+            emb_dropout=0.1,
+            lora_rank=args.lora_rank
         )
     elif args.network == 'VITs':
         model = ViTs_face(
@@ -49,7 +50,8 @@ def main(args):
             heads=8,
             mlp_dim=2048,
             dropout=0.1,
-            emb_dropout=0.1
+            emb_dropout=0.1,
+            lora_rank=args.lora_rank
         )
 
     model_root = args.model
@@ -83,6 +85,7 @@ def parse_arguments(argv):
     parser.add_argument('--target', default='lfw,talfw,sllfw,calfw,cplfw,cfp_fp,agedb_30',
                         help='')
     parser.add_argument('--batch_size', type=int, help='', default=20)
+    parser.add_argument('--lora_rank', type=int, help='', default=0)
     return parser.parse_args(argv)
 
 

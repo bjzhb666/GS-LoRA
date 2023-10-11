@@ -154,8 +154,11 @@ if __name__ == '__main__':
     torch.backends.cudnn.benchmark = True
 
     # FIXME: When change dataloader, it should fix the property file
-    with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
-        NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
+    # with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
+    #     NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
+    NUM_CLASS = 100
+    h,w = 112,112
+
     assert h == INPUT_SIZE[0] and w == INPUT_SIZE[1]
 
     dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
@@ -164,7 +167,7 @@ if __name__ == '__main__':
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
 
-    vers = get_val_data(EVAL_PATH, TARGET)
+    # vers = get_val_data(EVAL_PATH, TARGET)
     # # save vers variable
     # torch.save(vers, os.path.join('/data/zhaohongbo/Github/amnesic-face-recognition/dataset_test', "vers.pth"))
     # exit()

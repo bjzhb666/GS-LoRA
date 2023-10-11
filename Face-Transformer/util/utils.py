@@ -146,6 +146,9 @@ def test_forward(device, backbone, data_set):
     return forward_time
 
 def perform_val(multi_gpu, device, embedding_size, batch_size, backbone, data_set, issame, nrof_folds = 10):
+    '''
+    Perform face verification on LFW ect.
+    '''
     if multi_gpu:
         backbone = backbone.module # unpackage model from DataParallel
         backbone = backbone.to(device)
@@ -155,8 +158,9 @@ def perform_val(multi_gpu, device, embedding_size, batch_size, backbone, data_se
 
     embeddings_list = []
     for carray in data_set:
+        # import pdb; pdb.set_trace()
         idx = 0
-        embeddings = np.zeros([len(carray), embedding_size])
+        embeddings = np.zeros([len(carray), embedding_size]) # embedding_size = 512
         with torch.no_grad():
             while idx + batch_size <= len(carray):
                 batch = carray[idx:idx + batch_size]
@@ -182,7 +186,7 @@ def perform_val(multi_gpu, device, embedding_size, batch_size, backbone, data_se
 
     embeddings = embeddings_list[0] + embeddings_list[1]
     embeddings = sklearn.preprocessing.normalize(embeddings)
-    print(embeddings.shape)
+    print('embeddings shape',embeddings.shape)
 
     tpr, fpr, accuracy, best_thresholds = evaluate(embeddings, issame, nrof_folds)
     buf = gen_plot(fpr, tpr)
@@ -230,7 +234,7 @@ def perform_val_deit(multi_gpu, device, embedding_size, batch_size, backbone, di
 
     embeddings = embeddings_list[0] + embeddings_list[1]
     embeddings = sklearn.preprocessing.normalize(embeddings)
-    print(embeddings.shape)
+    print('embeddings shape', embeddings.shape) # (12000, 512)
 
     tpr, fpr, accuracy, best_thresholds = evaluate(embeddings, issame, nrof_folds)
     buf = gen_plot(fpr, tpr)
@@ -248,7 +252,8 @@ def buffer_val(db_name, acc, std, xnorm, best_threshold, roc_curve_tensor, batch
     wandb.log({"{}_Accuracy".format(db_name): acc, 
                "{}_Std".format(db_name): std, "{}_XNorm".format(db_name): xnorm, 
                "{}_Best_Threshold".format(db_name): best_threshold, 
-               "{}_ROC_Curve".format(db_name): roc_curve_tensor}, step=batch)
+            #    "{}_ROC_Curve".format(db_name): roc_curve_tensor
+               }, step=batch)
 
 
 class AverageMeter(object):

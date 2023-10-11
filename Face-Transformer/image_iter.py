@@ -22,20 +22,24 @@ from mxnet import recordio
 import logging
 import numbers
 import random
+from torch.utils.data import Dataset
+
 logger = logging.getLogger()
 
 from IPython import embed
 
+
 class FaceDataset(data.Dataset):
+
     def __init__(self, path_imgrec, rand_mirror):
         self.rand_mirror = rand_mirror
         assert path_imgrec
         if path_imgrec:
-            logging.info('loading recordio %s...',
-                         path_imgrec)
+            logging.info('loading recordio %s...', path_imgrec)
             path_imgidx = path_imgrec[0:-4] + ".idx"
             print(path_imgrec, path_imgidx)
-            self.imgrec = recordio.MXIndexedRecordIO(path_imgidx, path_imgrec, 'r')
+            self.imgrec = recordio.MXIndexedRecordIO(path_imgidx, path_imgrec,
+                                                     'r')
             s = self.imgrec.read_idx(0)
             header, _ = recordio.unpack(s)
             if header.flag > 0:
@@ -45,7 +49,8 @@ class FaceDataset(data.Dataset):
                 # self.imgidx = range(1, int(header.label[0]))
                 self.imgidx = []
                 self.id2range = {}
-                self.seq_identity = range(int(header.label[0]), int(header.label[1]))
+                self.seq_identity = range(int(header.label[0]),
+                                          int(header.label[1]))
                 for identity in self.seq_identity:
                     s = self.imgrec.read_idx(identity)
                     header, _ = recordio.unpack(s)
@@ -81,11 +86,67 @@ class FaceDataset(data.Dataset):
         return len(self.seq)
 
 
+class WrapperDataset(Dataset):
+
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.num_classes = self._count_classes()
+        self.class_counts = self._count_per_class()
+        self.new_length = self._calculate_new_length()
+
+        # 使用缓存存储类别样本列表
+        self.class_samples_cache = {}
+
+    def _count_classes(self):
+        classes = set(label for _, label in self.dataset)
+        return len(classes)
+
+    def _count_per_class(self):
+        class_counts = {}
+        for _, label in self.dataset:
+            class_counts[label] = class_counts.get(label, 0) + 1
+        return list(class_counts.values())
+
+    def _calculate_new_length(self):
+        return sum(int(count * 0.1) for count in self.class_counts)
+
+    def __len__(self):
+        return self.new_length
+
+    def __getitem__(self, index):
+        target_count = int(index / 0.1)
+        selected_class = None
+        for class_index, count in enumerate(self.class_counts):
+            if target_count < count:
+                selected_class = class_index
+                break
+            target_count -= count
+
+        # 检查缓存中是否有该类别的样本列表
+        if selected_class in self.class_samples_cache:
+            class_samples = self.class_samples_cache[selected_class]
+        else:
+            # 如果缓存中没有，则遍历数据集，获取该类别的样本列表
+            class_samples = []
+            for image, label in self.dataset:
+                if label == selected_class:
+                    class_samples.append((image, label))
+            # 将样本列表存入缓存
+            self.class_samples_cache[selected_class] = class_samples
+
+        return class_samples[target_count]
+
+
 if __name__ == '__main__':
     root = './data/faces_webface_112x112/train.rec'
     embed()
-    dataset = FaceDataset(path_imgrec =root, rand_mirror = False)
-    trainloader = data.DataLoader(dataset, batch_size=32, shuffle=True, num_workers=2, drop_last=False)
-    print(len(dataset)) # 490623
+    dataset = FaceDataset(path_imgrec=root, rand_mirror=False)
+    trainloader = data.DataLoader(dataset,
+                                  batch_size=32,
+                                  shuffle=True,
+                                  num_workers=2,
+                                  drop_last=False)
+    print(len(dataset))  # 490623
     for data, label in trainloader:
-        print(data.shape, label) # torch.Size([32, 3, 112, 112]) torch.Size([32])
+        print(data.shape,
+              label)  # torch.Size([32, 3, 112, 112]) torch.Size([32])

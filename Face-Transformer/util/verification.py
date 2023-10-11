@@ -35,6 +35,19 @@ from scipy.spatial.distance import pdist
 
 
 def calculate_roc(thresholds, embeddings1, embeddings2, actual_issame, nrof_folds = 10, pca = 0):
+    '''
+    :param thresholds: 0~4, 0.01
+    :param embeddings1: (6000, 512)
+    :param embeddings2: (6000, 512)
+    :param actual_issame: (6000,)
+    :param nrof_folds: 10
+    :param pca: 0
+    :return: tpr, fpr, accuracy, best_thresholds
+        tpr: true positive rate (400,)
+        fpr: false positive rate (400,)
+        accuracy: (10,)
+        best_thresholds: (10,)
+    '''
     assert (embeddings1.shape[0] == embeddings2.shape[0])
     assert (embeddings1.shape[1] == embeddings2.shape[1])
     nrof_pairs = min(len(actual_issame), embeddings1.shape[0])
@@ -49,13 +62,15 @@ def calculate_roc(thresholds, embeddings1, embeddings2, actual_issame, nrof_fold
     # print('pca', pca)
 
     if pca == 0:
-        diff = np.subtract(embeddings1, embeddings2)
-        dist = np.sum(np.square(diff), 1)
+        diff = np.subtract(embeddings1, embeddings2) # (6000, 512)
+        dist = np.sum(np.square(diff), 1) # (6000,)
         # dist = pdist(np.vstack([embeddings1, embeddings2]), 'cosine')
-
+    import pdb; pdb.set_trace()
     for fold_idx, (train_set, test_set) in enumerate(k_fold.split(indices)):
         # print('train_set', train_set)
         # print('test_set', test_set)
+        # train_set:array([   0,    1,    2, ..., 5397, 5398, 5399])
+        # test_set:array([5400, 5401, 5402, ..., 5997, 5998, 5999])
         if pca > 0:
             print("doing pca on", fold_idx)
             embed1_train = embeddings1[train_set]
@@ -92,7 +107,13 @@ def calculate_roc(thresholds, embeddings1, embeddings2, actual_issame, nrof_fold
 
 
 def calculate_accuracy(threshold, dist, actual_issame):
-    predict_issame = np.less(dist, threshold)
+    '''
+    calculate accuracy by comparing the distance with threshold
+    :param threshold: a scale from thresholds:0~4, 0.01
+    :param dist: (5400,)
+    :param actual_issame: (6000,)
+    '''
+    predict_issame = np.less(dist, threshold) # (5400,)
     tp = np.sum(np.logical_and(predict_issame, actual_issame))
     fp = np.sum(np.logical_and(predict_issame, np.logical_not(actual_issame)))
     tn = np.sum(np.logical_and(np.logical_not(predict_issame), np.logical_not(actual_issame)))
@@ -162,9 +183,10 @@ def calculate_val_far(threshold, dist, actual_issame):
 def evaluate(embeddings, actual_issame, nrof_folds = 10, pca = 0):
     # Calculate evaluation metrics
     thresholds = np.arange(0, 4, 0.01)
-    embeddings1 = embeddings[0::2]
-    embeddings2 = embeddings[1::2]
+    embeddings1 = embeddings[0::2] # shape: (6000, 512)
+    embeddings2 = embeddings[1::2] # shape: (6000, 512)
     tpr, fpr, accuracy, best_thresholds = calculate_roc(thresholds, embeddings1, embeddings2, np.asarray(actual_issame), nrof_folds = nrof_folds, pca = pca)
+    # accuracy是一个列表有10个元素，是10折交叉验证的结果
 #     thresholds = np.arange(0, 4, 0.001)
 #     val, val_std, far = calculate_val(thresholds, embeddings1, embeddings2,
 #                                       np.asarray(actual_issame), 1e-3, nrof_folds=nrof_folds)
