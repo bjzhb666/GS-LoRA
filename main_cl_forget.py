@@ -621,6 +621,7 @@ def main(args):
             return
         
         if args.one_stage:
+            cl_beta = args.cl_beta_list[task_i]
             print("start one stage training")
             start_time = time.time()
             epoch = 0
@@ -634,7 +635,7 @@ def main(args):
                                                         data_loader_remain=data_loader_remain,
                                                         optimizer=optimizer_forget, device=device,
                                                         epoch=epoch, max_norm=args.clip_max_norm,
-                                                        beta=args.beta, alpha=args.alpha)
+                                                        beta=cl_beta, alpha=args.alpha)
                 lr_scheduler_forget.step()
 
                 print("One stage training. Testing for forget classes")
