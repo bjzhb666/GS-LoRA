@@ -34,7 +34,7 @@ def get_config(args):
     elif args.data_mode == 'casia':
         configuration['DATA_ROOT'] = './data/faces_webface_112x112/'
     elif args.data_mode == 'casia100':
-        configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub100/'
+        configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub100_train_test/'
     elif args.data_mode == 'casia1000':
         configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub1000/'
     else:

@@ -255,13 +255,16 @@ if __name__ == '__main__':
     wandb.init(project="face recognition",
                group='casia100',
                mode="offline" if args.wandb_offline else "online")
-    wandb.config.update(cfg)
+    wandb.config.update(args) 
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
     torch.backends.cudnn.benchmark = True
 
     # with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
     #     NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
-    NUM_CLASS = 100
+    if args.data_mode == 'casia100':
+        NUM_CLASS = 100
+    elif args.data_mode == 'casia1000':
+        NUM_CLASS = 1000
     h, w = 112, 112
 
     assert h == INPUT_SIZE[0] and w == INPUT_SIZE[1]
@@ -272,10 +275,12 @@ if __name__ == '__main__':
     # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
     dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
     # 划分训练集和测试集
-    train_size = int(0.8 * len(dataset))
-    test_size = len(dataset) - train_size
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        dataset, [train_size, test_size], generator=random_generator)
+    # train_size = int(0.8 * len(dataset))
+    # test_size = len(dataset) - train_size
+    # train_dataset, test_dataset = torch.utils.data.random_split(
+    #     dataset, [train_size, test_size], generator=random_generator)
+    train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)  
+    test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
 
     trainloader = torch.utils.data.DataLoader(train_dataset,
                                               batch_size=BATCH_SIZE,
@@ -465,7 +470,7 @@ if __name__ == '__main__':
                         # 在这里进行测试操作
                         images = images.to(DEVICE)
                         labels = labels.to(DEVICE).long()
-                        
+
                         outputs, _ = BACKBONE(images, labels)  # 假设model是你的模型
                         # import pdb; pdb.set_trace()
                         _, predicted = torch.max(outputs.data, 1)
