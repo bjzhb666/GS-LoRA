@@ -1,7 +1,8 @@
 import torch
 import torchvision.transforms as transforms
 import torch.nn.functional as F
-
+from torchvision.datasets import ImageFolder
+from torchvision.transforms import ToTensor
 from .verification import evaluate
 
 from datetime import datetime
@@ -306,6 +307,35 @@ def train_accuracy(output, target, topk=(1,)):
         res.append(correct_k.mul_(100.0 / batch_size))
 
     return res[0]
+
+
+def split_dataset(dataset, class_order_list, split1_start, split1_end, split2_start, split2_end):
+    # 获取原始数据集的类别数量
+    num_classes = len(dataset.classes)
+
+    # 切分区间1的类别索引范围
+    split1_class_indices = class_order_list[split1_start:split1_end+1]
+
+    # 创建切分区间1的数据集
+    split1_samples = [(sample, label) for sample, label in dataset.samples if label in split1_class_indices]
+    split1_dataset = ImageFolder(root=dataset.root, transform=ToTensor())
+    split1_dataset.samples = split1_samples
+    split1_dataset.targets = [label for _, label in split1_samples]
+    split1_dataset.classes = [dataset.classes[idx] for idx in split1_class_indices]
+    split1_dataset.class_to_idx = {class_name: i for i, class_name in enumerate(split1_dataset.classes)}
+
+    # 切分区间2的类别索引范围
+    split2_class_indices = class_order_list[split2_start:split2_end+1]
+
+    # 创建切分区间2的数据集
+    split2_samples = [(sample, label) for sample, label in dataset.samples if label in split2_class_indices]
+    split2_dataset = ImageFolder(root=dataset.root, transform=ToTensor())
+    split2_dataset.samples = split2_samples
+    split2_dataset.targets = [label for _, label in split2_samples]
+    split2_dataset.classes = [dataset.classes[idx] for idx in split2_class_indices]
+    split2_dataset.class_to_idx = {class_name: i for i, class_name in enumerate(split2_dataset.classes)}
+
+    return split1_dataset, split2_dataset
 
 if __name__ == '__main__':
     vers=get_val_data(data_path='./eval/',targets=['lfw'])
