@@ -833,7 +833,7 @@ def main(args):
         if args.si:
             pass
 
-        if args.mas:
+        if args.MAS:
             print("start mas training in task", task_i)
             start_time = time.time()
 
