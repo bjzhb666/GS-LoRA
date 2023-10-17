@@ -15,7 +15,7 @@ import datasets.samplers as samplers
 from datasets import build_dataset, get_coco_api_from_dataset, CLDatasetWrapper
 from datasets.incremental import generate_cls_order
 from engine import evaluate
-from engine_cl import train_one_epoch_l2
+from engine_cl import train_one_epoch_l2, train_one_epoch_ewc, train_one_epoch_mas, train_one_epoch_si
 from models import build_model
 import wandb
 import os
@@ -270,12 +270,14 @@ def get_args_parser():
     parser.add_argument('--l2_lambda',default=0.01,type=float,help='lambda for l2 regularization')
     parser.add_argument('--ewc',default=False,action='store_true',help='whether to use ewc')
     parser.add_argument('--ewc_lambda',default=0.01,type=float,help='lambda for ewc')
-    parser.add_argument('--mas',default=False,action='store_true',help='whether to use mas')
+    parser.add_argument('--MAS',default=False,action='store_true',help='whether to use mas')
     parser.add_argument('--mas_lambda',default=0.01,type=float,help='lambda for mas')
     parser.add_argument('--si',default=False,action='store_true',help='whether to use si')
     parser.add_argument('--si_lambda',default=0.01,type=float,help='lambda for si')
     parser.add_argument('--replay',default=False,action='store_true',help='whether to use replay')
-
+    parser.add_argument('--online',default=False,action='store_true',help='whether to use online regularization')
+    # ewc args
+    parser.add_argument('--n_fisher_sample',default=None,type=int,help='number of samples to estimate fisher')
     # forget learning factor
     parser.add_argument('--beta', default=0.04, type=float, help='beta for balancing the remain and forget loss')
     parser.add_argument('--alpha', default=0.04, type=float, help='alpha for group sparse loss')
@@ -356,6 +358,8 @@ def main(args):
     
     regularization_terms = {} # for regularization terms
 
+    # TODO: need to add origin dataset for the first task
+    # origin_dataset = 
     for task_i in range(args.num_tasks): # start from 0
         # modify num_of_first_cls according to task id
         print('\n')
@@ -604,7 +608,8 @@ def main(args):
             utils.log_wandb(args=args,array=remain_maps,name='remain',task_i='eval', epoch=0)
             return
         
-
+        parms_without_ddp = {n:p for n,p in model_without_ddp.named_parameters() if p.requires_grad} # for convenience
+        
         # choose the training method, l2, ewc, mas, si, replay+ewc, replay+mas, replay+si, replay+l2
         if args.l2:
             print("start l2 training in", task_i)
@@ -685,7 +690,10 @@ def main(args):
 
             # 3. calculate the importance matrix and get the regularization terms
             importance = calculate_importance_l2(model_without_ddp, data_loader_remain)
-            regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
+            if args.online and len(regularization_terms) > 0: # only have one importance matrix
+                regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+            else:
+                regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -721,8 +729,52 @@ def main(args):
                         task_param[n] = p.clone().detach()
 
                 def calculate_importance_ewc(model, dataloader):
-                    pass
+                    print('calculate importance of ewc...')
 
+                    # Initialize the importance matrix
+                    if args.online and len(regularization_terms) > 0:
+                        importance = regularization_terms[0]['importance']
+                    else:
+                        importance = {}
+                        for n, p in model_without_ddp.named_parameters():
+                            if p.requires_grad:
+                                importance[n] = p.clone().detach().fill_(0) # zero initialization
+
+                    
+                    # Sample a subset (n_fisher_sample) of data to estimate the importance matrix (batch size is 1)
+                    # Otherwise it uses mini-batch to estimate the importance matrix. This speeds up the process a lot with similar performance.
+
+                    if args.n_fisher_sample is not None: 
+                        # FIXME: there is a bug RuntimeError:  Trying to resize storage that is not resizable
+                        n_sample = min(args.n_fisher_sample, len(dataloader.dataset))
+                        print('Sample', args.n_fisher_sample, 'data to estimate the importance matrix')
+                        rand_ind = random.sample(list(range(len(dataloader.dataset))), n_sample)
+                        subdata = torch.utils.data.Subset(dataloader.dataset, rand_ind)
+                        subdataloader = DataLoader(subdata, batch_size=2, shuffle=True, num_workers=args.num_workers, pin_memory=True)
+                    else:
+                        subdataloader = dataloader 
+                    
+                    model.eval()
+                    # Accumulate the square of gradients
+                    for i,(samples, targets) in enumerate(subdataloader):
+                        samples = samples.to(device)
+                       
+                        targets = [{k: v.to(device) for k, v in t.items()} for t in targets] 
+                        # if dist.get_rank()==0:
+                        #     import pdb; pdb.set_trace()
+                        outputs = model(samples) # outputs is a list of dicts
+                        loss_dict = criterion(outputs, targets) # loss_dict is a dict
+                        weight_dict = criterion.weight_dict
+                        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
+                        model.zero_grad()
+                        losses.backward()
+                        for n,p in importance.items():
+                            if parms_without_ddp[n].grad is not None: # some parameters may not have grad
+                                p +=((parms_without_ddp[n].grad**2)*len(samples.tensors)/len(subdataloader))
+                    
+                    model.train()
+                    return importance
+                
                 importance = calculate_importance_ewc(model_without_ddp, data_loader_remain)
                 regularization_terms[0] = {'importance':importance, 'task_param':task_param}
 
@@ -732,14 +784,14 @@ def main(args):
                 sampler_cl_forget.set_epoch(ewc_epoch)
                 if args.replay:
                     train_stats = train_one_epoch_ewc(model=model,criterion=criterion,
-                                                        data_loader=data_loader_total,
+                                                        data_loader_cl_forget=data_loader_total,
                                                         device=device,optimizer=optimizer,epoch=ewc_epoch,
                                                         clip_max_norm=args.clip_max_norm,
                                                         ewc_lambda=args.ewc_lambda,regularization_terms=regularization_terms)
                     
                 else: # no replay
                     train_stats = train_one_epoch_ewc(model=model,criterion=criterion,
-                                                        data_loader=data_loader_cl_forget,
+                                                        data_loader_cl_forget=data_loader_cl_forget,
                                                         device=device,optimizer=optimizer,epoch=ewc_epoch,
                                                         clip_max_norm=args.clip_max_norm,
                                                         ewc_lambda=args.ewc_lambda,regularization_terms=regularization_terms)
@@ -766,7 +818,10 @@ def main(args):
 
             # 3. calculate the importance matrix and get the regularization terms
             importance = calculate_importance_ewc(model_without_ddp, data_loader_remain)
-            regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
+            if args.online and len(regularization_terms) > 0: # only have one importance matrix
+                regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+            else:
+                regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -775,19 +830,123 @@ def main(args):
             if args.rank == 0:
                 wandb.log({'time': total_time_str})
                 
-
         if args.si:
             pass
 
         if args.mas:
-            pass
+            print("start mas training in task", task_i)
+            start_time = time.time()
 
+            # reinitialize the optimizer
+            if args.sgd:
+                optimizer = torch.optim.SGD(param_dicts,
+                                        lr=args.lr,
+                                        momentum=0.9,
+                                        weight_decay=args.weight_decay)
+            else:
+                optimizer = torch.optim.AdamW(param_dicts,
+                                            lr=args.lr,
+                                            weight_decay=args.weight_decay)
+                
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
+                                                        args.lr_drop)
+            
+            if task_i == 0: # the pretrained task, we don't need to train, only calculate the importance matrix
+                # 1.Backup the weight of current task
+                task_param = {}
+                model_without_ddp = model.module
+                for n, p in model_without_ddp.named_parameters():
+                    if p.requires_grad:
+                        task_param[n] = p.clone().detach()
 
+                def calculate_importance_mas(model, dataloader):
+                    print('calculate importance of mas...')
 
+                    # Initialize the importance matrix
+                    if args.online and len(regularization_terms) > 0:
+                        importance = regularization_terms[0]['importance']
+                    else:
+                        importance = {}
+                        for n, p in model_without_ddp.named_parameters():
+                            if p.requires_grad:
+                                importance[n] = p.clone().detach().fill_(0) # zero initialization
 
+                    model.eval()
 
+                    # 网络输出logits的L2范数的平方作为loss，对其求偏导，得到梯度
+                    for i, (samples, targets) in enumerate(dataloader):
+                        samples = samples.to(device)
+                        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+                        outputs = model(samples)  # outputs is a list of dicts
+                        outputs_logit = outputs['pred_logits']
+                        outputs_logit.pow_(2)
+                        loss = outputs_logit.mean()
 
+                        model.zero_grad()
+                        loss.backward()
+
+                        for n,p in importance.items():
+                            if parms_without_ddp[n].grad is not None:
+                                p +=(parms_without_ddp[n].grad.abs()/len(dataloader))
+
+                    model.train()
+                    return importance    
+                
+                importance = calculate_importance_mas(model_without_ddp, data_loader_remain)
+                regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+
+            # 1. learn the current task
+            mas_epoch = 0
+            for mas_epoch in range(args.epochs):
+                sampler_cl_forget.set_epoch(mas_epoch)
+                if args.replay:
+                    train_stats = train_one_epoch_mas(model=model,criterion=criterion,
+                                                        data_loader_cl_forget=data_loader_total,
+                                                        device=device,optimizer=optimizer,epoch=mas_epoch,
+                                                        clip_max_norm=args.clip_max_norm,
+                                                        mas_lambda=args.mas_lambda,regularization_terms=regularization_terms)
+                    
+                else:
+                    train_stats = train_one_epoch_mas(model=model,criterion=criterion,
+                                                        data_loader_cl_forget=data_loader_cl_forget,
+                                                        device=device,optimizer=optimizer,epoch=mas_epoch,
+                                                        clip_max_norm=args.clip_max_norm,
+                                                        mas_lambda=args.mas_lambda,regularization_terms=regularization_terms)
+                    
+                lr_scheduler.step()
+
+                print("mas regularization training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_forget,
+                    base_ds_forget, device, args.output_dir)
+                utils.log_wandb(args=args,array=forget_maps,name='forget',task_i=task_i, epoch=mas_epoch+1)
+                print("mas regularization training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_remain,
+                    base_ds_remain, device, args.output_dir)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=mas_epoch+1)
+
+            # 2. Backup the weight of current task
+            task_param = {}
+            model_without_ddp = model.module
+            for n, p in model_without_ddp.named_parameters():
+                if p.requires_grad:
+                    task_param[n] = p.clone().detach()
+
+            # 3. calculate the importance matrix and get the regularization terms
+            importance = calculate_importance_mas(model_without_ddp, data_loader_remain)
+            if args.online and len(regularization_terms) > 0:
+                regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+            else:
+                regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
+
+            end_time = time.time()
+            total_time = end_time - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print('Training time {}'.format(total_time_str))
+            if args.rank == 0:
+                wandb.log({'time': total_time_str})
 
         
     return
@@ -812,7 +971,7 @@ if __name__ == '__main__':
             wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-l2'   
         if args.ewc:
              wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-ewc'
-        if args.mas:
+        if args.MAS:
             wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-mas'
         if args.si:
             wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-si'
