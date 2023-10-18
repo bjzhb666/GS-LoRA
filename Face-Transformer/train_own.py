@@ -458,7 +458,7 @@ if __name__ == '__main__':
                 print("Learning rate %f" % lr)
                 print("Perform Evaluation on test set and Save Checkpoints...")
                 acc = []
-
+                BACKBONE.eval()  # set to evaluation mode
                 # 遍历测试集
                 correct = 0
                 total = 0
