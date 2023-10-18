@@ -86,7 +86,7 @@ class FaceDataset(data.Dataset):
         return len(self.seq)
 
 
-class WrapperDataset(Dataset):
+class Wrapper10Dataset(Dataset):
     '''
     该数据集类用于将原始数据集的样本数量减少到原来的10%
     '''
