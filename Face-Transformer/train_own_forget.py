@@ -20,15 +20,8 @@ from vit_pytorch_face import ViTs_face
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
-
-
-def need_save(acc, highest_acc):
-    if acc > highest_acc:
-        highest_acc = acc
-        do_save = True
-    else:
-        do_save = False
-    return do_save
+from engine import train_one_epoch, eval_data
+from torch.utils.data import Subset
 
 
 def count_trainable_parameters(model):
@@ -195,9 +188,16 @@ if __name__ == '__main__':
     # VIT depth
     parser.add_argument('--vit_depth',
                         type=int,
-                        default=10,
+                        default=6,
                         metavar='N',
-                        help='vit depth (default: 20)')
+                        help='vit depth (default: 6)')
+    
+    # add forget parameters
+    parser.add_argument('--num_of_first_cls',type=int,default=90,help='number of first class')
+    parser.add_argument('--per_forget_cls', type=int,default=10)
+    parser.add_argument('--BND', type=float,default=10)
+    parser.add_argument('--beta', type=float,default=0.03)
+
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -240,7 +240,7 @@ if __name__ == '__main__':
     wandb.init(project="face recognition",
                group='casia100',
                mode="offline" if args.wandb_offline else "online")
-    wandb.config.update(args) 
+    wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
     torch.backends.cudnn.benchmark = True
 
@@ -258,25 +258,80 @@ if __name__ == '__main__':
         transforms.ToTensor(),
     ])
     # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
-    dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
-    
-    train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)  
-    test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
+    # dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
 
-    trainloader = torch.utils.data.DataLoader(train_dataset,
+    # create order list
+    order_list = list(range(NUM_CLASS))
+    # shuffle order list
+    import random
+    random.shuffle(order_list)
+
+    # split datasets
+    # 1. calculate st1, en1, st2, en2
+    st1 = 0
+    en1 = args.num_of_first_cls
+    st2 = en1
+    en2 = en1+args.per_forget_cls
+    # 2. split datasets
+    train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)
+    test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
+    forget_dataset_train, remain_dataset_train = split_dataset(dataset=train_dataset,
+                                                               class_order_list=order_list,
+                                                               split1_start=st1,
+                                                               split1_end=en1,
+                                                               split2_start=st2,
+                                                               split2_end=en2)
+    forget_dataset_test, remain_dataset_test = split_dataset(dataset=test_dataset,
+                                                                class_order_list=order_list,
+                                                                split1_start=st1,
+                                                                split1_end=en1,
+                                                                split2_start=st2,
+                                                                split2_end=en2)
+
+    
+    # get sub datasets
+    len_forget_dataset_train = len(forget_dataset_train)
+    len_remain_dataset_train = len(remain_dataset_train)
+    subset_size_forget = int(len_forget_dataset_train*0.1)
+    subset_size_remain = int(len_remain_dataset_train*0.1)
+
+    subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
+    subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
+
+    forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
+    remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
+
+    train_loader_forget = torch.utils.data.DataLoader(forget_dataset_train_sub,
                                               batch_size=BATCH_SIZE,
                                               shuffle=True,
                                               num_workers=WORKERS,
-                                              drop_last=True)
-    testloader = torch.utils.data.DataLoader(test_dataset,
-                                             batch_size=BATCH_SIZE,
-                                             shuffle=False,
-                                             num_workers=WORKERS,
-                                             drop_last=False)
+                                              drop_last=False)
+    train_loader_remain = torch.utils.data.DataLoader(remain_dataset_train_sub,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=True,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    testloader_forget = torch.utils.data.DataLoader(forget_dataset_test,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=False,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    testloader_remain = torch.utils.data.DataLoader(remain_dataset_test,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=False,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    # import pdb; pdb.set_trace()
+    # testloader = torch.utils.data.DataLoader(test_dataset,
+    #                                          batch_size=BATCH_SIZE,
+    #                                          shuffle=False,
+    #                                          num_workers=WORKERS,
+    #                                          drop_last=False)
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
 
     highest_acc = 0.0
+    highest_H_mean = 0.0
 
     #embed()
     #======= model & loss & optimizer =======#
@@ -333,7 +388,7 @@ if __name__ == '__main__':
         if os.path.isfile(BACKBONE_RESUME_ROOT):
             print("Loading Backbone Checkpoint '{}'".format(
                 BACKBONE_RESUME_ROOT))
-            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT))
+            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
         else:
             print(
                 "No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch"
@@ -345,14 +400,14 @@ if __name__ == '__main__':
         print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
     else:
         print("Do not use LoRA in Transformer FFN, train all parameters."
-              )  # 68631040
+              )  # 19,157,504
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
-    print("learnable_parameters", learnable_parameters)  # 31760896
-    # print("ratio of learnable_parameters", learnable_parameters/31760896) # 0.011938
+    print("learnable_parameters", learnable_parameters)  # 19,157,504
+    print("ratio of learnable_parameters", learnable_parameters/19157504)
     wandb.log({
         "learnable_parameters": learnable_parameters,
-        #    'ratio of learnable_parameters': learnable_parameters/31760896,
+        'ratio of learnable_parameters': learnable_parameters/19157504,
         'lora_rank': args.lora_rank
     })
     # exit()
@@ -364,135 +419,57 @@ if __name__ == '__main__':
     else:
         # single-GPU setting
         BACKBONE = BACKBONE.to(DEVICE)
-
+      
     #======= train & validation & save checkpoint =======#
     DISP_FREQ = 10  # frequency to display training loss & acc
     VER_FREQ = 20  # frequency to perform validation
 
     batch = 0  # batch index
 
-    losses = AverageMeter()
-    top1 = AverageMeter()
+    losses_forget = AverageMeter()
+    top1_forget = AverageMeter()
+    losses_remain = AverageMeter()
+    top1_remain = AverageMeter()
+    losses_total = AverageMeter()  
 
     BACKBONE.train()  # set to training mode
 
+    model_without_ddp = BACKBONE.module if MULTI_GPU else BACKBONE
+
+    # eval before training
+    print("Perform Evaluation on forget test set and remain test set...")
+    forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, 'forget', batch)
+    remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain', batch)
+    wandb.log({"forget_acc_before": forget_acc_before,
+                "remain_acc_before": remain_acc_before})
+    
     for epoch in range(NUM_EPOCH):  # start training process
 
         lr_scheduler.step(epoch)
 
         last_time = time.time()
 
-        for inputs, labels in iter(trainloader):
+        batch,highest_H_mean = train_one_epoch(model=BACKBONE,
+                        dataloader_forget=train_loader_forget,
+                        dataloader_remain=train_loader_remain,
+                        testloader_forget=testloader_forget,
+                        testloader_remain=testloader_remain,
+                        device=DEVICE,
+                        criterion=LOSS,
+                        optimizer=OPTIMIZER,
+                        epoch=epoch,
+                        batch=batch,
+                        losses_forget=losses_forget,
+                        top1_forget=top1_forget,
+                        losses_remain=losses_remain,
+                        top1_remain=top1_remain,
+                        losses_total=losses_total,
+                        beta=args.beta,
+                        BND=args.BND,
+                        forget_acc_before = forget_acc_before,
+                        highest_H_mean=highest_H_mean,
+                        cfg=cfg,)
+        print(batch)
 
-            # compute output
-            inputs = inputs.to(DEVICE)
-            labels = labels.to(DEVICE).long()
-            # print("inputs", inputs.shape, inputs.dtype)
-            # print("labels", labels.shape, labels.dtype)
-            # print("labels", labels)
-            outputs, emb = BACKBONE(inputs.float(), labels)
-            loss = LOSS(outputs, labels)
-
-            #print("outputs", outputs, outputs.data)
-            # measure accuracy and record loss
-            prec1 = train_accuracy(outputs.data, labels, topk=(1, ))
-
-            losses.update(loss.data.item(), inputs.size(0))
-            top1.update(prec1.data.item(), inputs.size(0))
-
-            # compute gradient and do SGD step
-            OPTIMIZER.zero_grad()
-            loss.backward()
-            OPTIMIZER.step()
-
-            # dispaly training loss & acc every DISP_FREQ (buffer for visualization)
-            if ((batch + 1) % DISP_FREQ == 0) and batch != 0:
-                epoch_loss = losses.avg
-                epoch_acc = top1.avg
-                # writer.add_scalar("Training/Training_Loss", epoch_loss, batch + 1)
-                # writer.add_scalar("Training/Training_Accuracy", epoch_acc, batch + 1)
-                wandb.log(
-                    {
-                        "Training/Training_Loss": epoch_loss,
-                        "Training/Training_Accuracy": epoch_acc
-                    },
-                    step=batch + 1)
-                batch_time = time.time() - last_time
-                last_time = time.time()
-
-                print('Epoch {} Batch {}\t'
-                      'Speed: {speed:.2f} samples/s\t'
-                      'Training Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Training Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-                          epoch + 1,
-                          batch + 1,
-                          speed=inputs.size(0) * DISP_FREQ / float(batch_time),
-                          loss=losses,
-                          top1=top1))
-                #print("=" * 60)
-                losses = AverageMeter()
-                top1 = AverageMeter()
-
-            if (
-                (batch + 1) % VER_FREQ == 0
-            ) and batch != 0:  #perform validation & save checkpoints (buffer for visualization)
-                for params in OPTIMIZER.param_groups:
-                    lr = params['lr']
-                    break
-                print("Learning rate %f" % lr)
-                print("Perform Evaluation on test set and Save Checkpoints...")
-                acc = []
-
-                # 遍历测试集
-                correct = 0
-                total = 0
-                with torch.no_grad():
-                    for images, labels in testloader:
-                        # 在这里进行测试操作
-                        images = images.to(DEVICE)
-                        labels = labels.to(DEVICE).long()
-
-                        outputs, _ = BACKBONE(images, labels)  # 假设model是你的模型
-                        # import pdb; pdb.set_trace()
-                        _, predicted = torch.max(outputs.data, 1)
-                        total += labels.size(0)
-                        correct += (predicted == labels).sum().item()
-                # 打印测试精度
-                accuracy = 100 * correct / total
-                print('Test Accuracy: {:.2f}%'.format(accuracy))
-                wandb.log({"Test Accuracy": accuracy}, step=batch + 1)
-                acc.append(accuracy)
-                # save checkpoints per epoch
-
-                if accuracy > highest_acc:
-                    highest_acc = accuracy
-                    if MULTI_GPU:
-                        torch.save(
-                            BACKBONE.module.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth"
-                                .format(BACKBONE_NAME, epoch + 1, batch + 1,
-                                        get_time())))
-                    else:
-                        torch.save(
-                            BACKBONE.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth"
-                                .format(BACKBONE_NAME, epoch + 1, batch + 1,
-                                        get_time())))
-                    # set the maximum checkpoint numbers to keep
-                    if len(os.listdir(WORK_PATH)) >= 6:
-                        checkpoints = list(
-                            filter(lambda f: f.endswith('.pth'),
-                                   os.listdir(WORK_PATH)))
-                        checkpoints.sort(key=lambda f: os.path.getmtime(
-                            os.path.join(WORK_PATH, f)))
-                        os.remove(os.path.join(WORK_PATH, checkpoints[0]))
-                BACKBONE.train()  # set to training mode
-
-            batch += 1  # batch index
-
-    wandb.run.name = args.net + args.data_mode + args.head + str(args.lr) + 'bs' \
-        +str(args.batch_size) + 'ep' + str(args.epochs)
+    wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
+    +'-lora_rank-'+str(args.lora_rank)+'-vit_depth-'+str(args.vit_depth)
