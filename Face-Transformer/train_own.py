@@ -21,31 +21,6 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
 
-# def need_save(acc, highest_acc):
-#     do_save = False
-#     save_cnt = 0
-#     if acc[0] > 0.98:
-#         do_save = True
-#     for i, accuracy in enumerate(acc):
-#         if accuracy > highest_acc[i]:
-#             highest_acc[i] = accuracy
-#             do_save = True
-#         if i > 0 and accuracy >= highest_acc[i]-0.002:
-#             save_cnt += 1
-#     if save_cnt >= len(acc)*3/4 and acc[0]>0.99:
-#         do_save = True
-#     print("highest_acc:", highest_acc)
-#     return do_save
-
-
-def need_save(acc, highest_acc):
-    if acc > highest_acc:
-        highest_acc = acc
-        do_save = True
-    else:
-        do_save = False
-    return do_save
-
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
