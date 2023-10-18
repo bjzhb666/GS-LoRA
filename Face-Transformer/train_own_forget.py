@@ -199,6 +199,18 @@ if __name__ == '__main__':
     parser.add_argument('--BND', type=float,default=10)
     parser.add_argument('--beta', type=float,default=0.03)
     parser.add_argument('--alpha', type=float,default=0.1)
+
+    # mode selection
+    parser.add_argument('--one_stage',default=True, action='store_false', help='whether to use one stage training')
+    parser.add_argument('--l2',default=False, action='store_true', help='whether to use l2 norm')
+    parser.add_argument('--ewc',default=False, action='store_true', help='whether to use ewc')
+    parser.add_argument('--ewc_lambda',default=0.1, type=float, help='lambda for ewc')
+    parser.add_argument('--MAS', default=False, action='store_true', help='whether to use mas')
+    parser.add_argument('--mas_lambda', default=0.1, type=float, help='lambda for mas')
+    parser.add_argument('--si', default=False, action='store_true', help='whether to use si')
+    parser.add_argument('--si_c', default=0.1, type=float, help='c for si')
+    parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
+    parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#

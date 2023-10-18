@@ -54,4 +54,14 @@ def get_config(args):
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
 
+    configuration['one_stage'] = args.one_stage
+    configuration['ewc'] = args.ewc
+    configuration['ewc_lambda'] = args.ewc_lambda
+    configuration['MAS'] = args.MAS
+    configuration['MAS_lambda'] = args.MAS_lambda
+    configuration['si'] = args.si
+    configuration['si_c'] = args.si_c
+    configuration['online'] = args.online
+    configuration['replay'] = args.replay
+    configuration['l2'] = args.l2
     return configuration
