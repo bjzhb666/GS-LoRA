@@ -19,6 +19,7 @@ def train_one_epoch(model:torch.nn.Module,
                     top1_forget:util.AverageMeter,
                     top1_remain:util.AverageMeter,
                     beta:float,
+                    alpha:float,
                     BND:float,
                     batch:int,
                     testloader_forget:torch.utils.data.DataLoader,
@@ -35,8 +36,8 @@ def train_one_epoch(model:torch.nn.Module,
     prefetcher_forget = data_prefetcher(dataloader_forget, device, prefetch=True)
     inputs_forget, labels_forget = prefetcher_forget.next() # 已经将数据移动到GPU上了
 
-    DISP_FREQ = 5
-    VER_FREQ = 5
+    DISP_FREQ = 1
+    VER_FREQ = 1
     # import pdb; pdb.set_trace()
     for inputs_remain, labels_remain in iter(dataloader_remain):
         inputs_remain = inputs_remain.to(device)
@@ -60,11 +61,11 @@ def train_one_epoch(model:torch.nn.Module,
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
 
         # compute structure loss
-
+        structure_loss = get_structure_loss(model)
         # compute regularization loss
 
         # compute total loss
-        loss_total = loss_forget * beta + loss_remain
+        loss_total = loss_forget * beta + loss_remain + structure_loss * alpha
         losses_total.update(loss_total.data.item(), inputs_forget.size(0))
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -193,3 +194,71 @@ def eval_data(model:torch.nn.Module,
     return accuracy
 
 
+def get_structure_loss(model:torch.nn.Module):
+    if isinstance(model, torch.nn.DataParallel):
+        model_without_ddp = model.module
+    else:
+        model_without_ddp = model
+    learnable_params_name = [name for name, param in model_without_ddp.named_parameters() if param.requires_grad]
+
+    group_layers = []
+    '''
+    transformer.layers.0.1.fn.fn.net.0.lora_A
+    transformer.layers.0.1.fn.fn.net.0.lora_B
+    transformer.layers.0.1.fn.fn.net.3.lora_A
+    transformer.layers.0.1.fn.fn.net.3.lora_B
+    transformer.layers.1.1.fn.fn.net.0.lora_A
+    transformer.layers.1.1.fn.fn.net.0.lora_B
+    transformer.layers.1.1.fn.fn.net.3.lora_A
+    transformer.layers.1.1.fn.fn.net.3.lora_B
+    transformer.layers.2.1.fn.fn.net.0.lora_A
+    transformer.layers.2.1.fn.fn.net.0.lora_B
+    transformer.layers.2.1.fn.fn.net.3.lora_A
+    transformer.layers.2.1.fn.fn.net.3.lora_B
+    transformer.layers.3.1.fn.fn.net.0.lora_A
+    transformer.layers.3.1.fn.fn.net.0.lora_B
+    transformer.layers.3.1.fn.fn.net.3.lora_A
+    transformer.layers.3.1.fn.fn.net.3.lora_B
+    transformer.layers.4.1.fn.fn.net.0.lora_A
+    transformer.layers.4.1.fn.fn.net.0.lora_B
+    transformer.layers.4.1.fn.fn.net.3.lora_A
+    transformer.layers.4.1.fn.fn.net.3.lora_B
+    transformer.layers.5.1.fn.fn.net.0.lora_A
+    transformer.layers.5.1.fn.fn.net.0.lora_B
+    transformer.layers.5.1.fn.fn.net.3.lora_A
+    transformer.layers.5.1.fn.fn.net.3.lora_B
+    '''
+    for i in range(6):
+        group_item = []
+        group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+        group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+        group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+        group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+        group_layers.append(group_item)
+
+    # get the parameters
+    group_params = []
+    for group_item in group_layers:
+        group_param = []
+        for item in group_item:
+            group_param.append(model_without_ddp.get_parameter(item) if item in learnable_params_name else None)
+        group_params.append(group_param)
+
+
+    def group_sparse_multi_module(group_param):
+        # group_param is a list of parameters
+        # calculate the loss for a single group of parameters
+        def l2_loss(param_group):
+            return torch.sum(param_group**2)
+
+        lasso_sum = 0
+        for param in group_param:
+            lasso_sum += l2_loss(param)
+        return torch.sqrt(lasso_sum)
+
+    group_sparse_loss = 0
+    # calculate the loss for all groups of parameters
+    for group_param in group_params:
+        group_sparse_loss += group_sparse_multi_module(group_param)
+    # print('group_sparse_loss', group_sparse_loss)
+    return group_sparse_loss

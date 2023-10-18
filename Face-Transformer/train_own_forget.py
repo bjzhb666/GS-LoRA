@@ -23,6 +23,7 @@ import loralib as lora
 from engine import train_one_epoch, eval_data
 from torch.utils.data import Subset
 
+from IPython import embed
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -197,7 +198,7 @@ if __name__ == '__main__':
     parser.add_argument('--per_forget_cls', type=int,default=10)
     parser.add_argument('--BND', type=float,default=10)
     parser.add_argument('--beta', type=float,default=0.03)
-
+    parser.add_argument('--alpha', type=float,default=0.1)
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -370,7 +371,7 @@ if __name__ == '__main__':
     print(BACKBONE)
     print("{} Backbone Generated".format(BACKBONE_NAME))
     print("=" * 60)
-
+    
     LOSS = nn.CrossEntropyLoss()
 
     #embed()
@@ -468,7 +469,8 @@ if __name__ == '__main__':
                         BND=args.BND,
                         forget_acc_before = forget_acc_before,
                         highest_H_mean=highest_H_mean,
-                        cfg=cfg,)
+                        cfg=cfg,
+                        alpha=args.alpha)
         print(batch)
 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
