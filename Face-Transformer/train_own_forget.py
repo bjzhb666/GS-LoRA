@@ -25,6 +25,33 @@ from torch.utils.data import Subset
 
 from IPython import embed
 
+from vit_pytorch_face.vit_face import CosFace, ArcFace, Softmax, SFaceLoss
+class LossFaceCE(nn.Module):
+    """
+    combine the face loss and the LOSS (nn.CrossEntropyLoss())
+    """
+    def __init__(self, type, dim, num_class, GPU_ID) -> None:
+        super().__init__()
+        self.loss_type = type
+        self.GPU_ID = GPU_ID
+
+        if self.loss_type == 'Softmax':
+            self.loss = Softmax(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+        elif self.loss_type == 'CosFace':
+            self.loss = CosFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+        elif self.loss_type == 'ArcFace':
+            self.loss = ArcFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+        elif self.loss_type == 'SFace':
+            self.loss = SFaceLoss(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+        self.CEloss = nn.CrossEntropyLoss()
+
+
+    def forward(self, preds, labels):
+        face_loss = self.loss(preds, labels)
+        loss = self.CEloss(face_loss, labels)
+        return loss
+
+
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
                        if p.requires_grad)
@@ -52,7 +79,7 @@ if __name__ == '__main__':
         "-d",
         "--data_mode",
         help=
-        "use which database, [casia, vgg, ms1m, retina, ms1mr,casia100,casia1000]",
+        "use which database, [casia100, casia1000]",
         default='casia100',
         type=str)
     parser.add_argument("-n",
@@ -192,7 +219,7 @@ if __name__ == '__main__':
                         default=6,
                         metavar='N',
                         help='vit depth (default: 6)')
-    
+
     # add forget parameters
     parser.add_argument('--num_of_first_cls',type=int,default=90,help='number of first class')
     parser.add_argument('--per_forget_cls', type=int,default=10)
@@ -277,8 +304,9 @@ if __name__ == '__main__':
     order_list = list(range(NUM_CLASS))
     # shuffle order list
     import random
-    random.shuffle(order_list)
-
+    random.shuffle(order_list, generator=random_generator)
+    print('order_list', order_list)
+    
     # split datasets
     # 1. calculate st1, en1, st2, en2
     st1 = 0
@@ -288,20 +316,20 @@ if __name__ == '__main__':
     # 2. split datasets
     train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)
     test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
-    forget_dataset_train, remain_dataset_train = split_dataset(dataset=train_dataset,
+    remain_dataset_train, forget_dataset_train = split_dataset(dataset=train_dataset,
                                                                class_order_list=order_list,
                                                                split1_start=st1,
                                                                split1_end=en1,
                                                                split2_start=st2,
                                                                split2_end=en2)
-    forget_dataset_test, remain_dataset_test = split_dataset(dataset=test_dataset,
+    remain_dataset_test, forget_dataset_test = split_dataset(dataset=test_dataset,
                                                                 class_order_list=order_list,
                                                                 split1_start=st1,
                                                                 split1_end=en1,
                                                                 split2_start=st2,
                                                                 split2_end=en2)
 
-    
+
     # get sub datasets
     len_forget_dataset_train = len(forget_dataset_train)
     len_remain_dataset_train = len(remain_dataset_train)
@@ -334,6 +362,10 @@ if __name__ == '__main__':
                                                 shuffle=False,
                                                 num_workers=WORKERS,
                                                 drop_last=False)
+    print('len(train_loader_forget)', len(train_loader_forget))
+    print('len(train_loader_remain)', len(train_loader_remain))
+    print('len(testloader_forget)', len(testloader_forget))
+    print('len(testloader_remain)', len(testloader_remain))
     # import pdb; pdb.set_trace()
     # testloader = torch.utils.data.DataLoader(test_dataset,
     #                                          batch_size=BATCH_SIZE,
@@ -343,7 +375,6 @@ if __name__ == '__main__':
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
 
-    highest_acc = 0.0
     highest_H_mean = 0.0
 
     #embed()
@@ -383,8 +414,8 @@ if __name__ == '__main__':
     print(BACKBONE)
     print("{} Backbone Generated".format(BACKBONE_NAME))
     print("=" * 60)
-    
-    LOSS = nn.CrossEntropyLoss()
+
+    LOSS = LossFaceCE(type=HEAD_NAME,dim=512,num_class=NUM_CLASS, GPU_ID=GPU_ID)
 
     #embed()
     OPTIMIZER = create_optimizer(args, BACKBONE)
@@ -411,6 +442,9 @@ if __name__ == '__main__':
     if args.lora_rank > 0:
         lora.mark_only_lora_as_trainable(BACKBONE)
         print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
+        # for n,p in BACKBONE.named_parameters():
+        #     if 'loss.weight' in n: # 打开梯度
+        #         p.requires_grad = True
     else:
         print("Do not use LoRA in Transformer FFN, train all parameters."
               )  # 19,157,504
@@ -432,10 +466,8 @@ if __name__ == '__main__':
     else:
         # single-GPU setting
         BACKBONE = BACKBONE.to(DEVICE)
-      
+
     #======= train & validation & save checkpoint =======#
-    DISP_FREQ = 10  # frequency to display training loss & acc
-    VER_FREQ = 20  # frequency to perform validation
 
     batch = 0  # batch index
 
@@ -443,7 +475,8 @@ if __name__ == '__main__':
     top1_forget = AverageMeter()
     losses_remain = AverageMeter()
     top1_remain = AverageMeter()
-    losses_total = AverageMeter()  
+    losses_total = AverageMeter()
+    losses_structure = AverageMeter()
 
     BACKBONE.train()  # set to training mode
 
@@ -455,35 +488,35 @@ if __name__ == '__main__':
     remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain', batch)
     wandb.log({"forget_acc_before": forget_acc_before,
                 "remain_acc_before": remain_acc_before})
-    
+    BACKBONE.train()  # set to training mode
     for epoch in range(NUM_EPOCH):  # start training process
 
         lr_scheduler.step(epoch)
 
-        last_time = time.time()
-
-        batch,highest_H_mean = train_one_epoch(model=BACKBONE,
-                        dataloader_forget=train_loader_forget,
-                        dataloader_remain=train_loader_remain,
-                        testloader_forget=testloader_forget,
-                        testloader_remain=testloader_remain,
-                        device=DEVICE,
-                        criterion=LOSS,
-                        optimizer=OPTIMIZER,
-                        epoch=epoch,
-                        batch=batch,
-                        losses_forget=losses_forget,
-                        top1_forget=top1_forget,
-                        losses_remain=losses_remain,
-                        top1_remain=top1_remain,
-                        losses_total=losses_total,
-                        beta=args.beta,
-                        BND=args.BND,
-                        forget_acc_before = forget_acc_before,
-                        highest_H_mean=highest_H_mean,
-                        cfg=cfg,
-                        alpha=args.alpha)
-        print(batch)
+        batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure = train_one_epoch(
+            model=BACKBONE,
+            dataloader_forget=train_loader_forget,
+            dataloader_remain=train_loader_remain,
+            testloader_forget=testloader_forget,
+            testloader_remain=testloader_remain,
+            device=DEVICE,
+            criterion=LOSS,
+            optimizer=OPTIMIZER,
+            epoch=epoch,
+            batch=batch,
+            losses_forget=losses_forget,
+            top1_forget=top1_forget,
+            losses_remain=losses_remain,
+            top1_remain=top1_remain,
+            losses_total=losses_total,
+            losses_structure=losses_structure,
+            beta=args.beta,
+            BND=args.BND,
+            forget_acc_before=forget_acc_before,
+            highest_H_mean=highest_H_mean,
+            cfg=cfg,
+            alpha=args.alpha)
+        # print(batch)
 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
-    +'-lora_rank-'+str(args.lora_rank)+'-vit_depth-'+str(args.vit_depth)
+    +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)

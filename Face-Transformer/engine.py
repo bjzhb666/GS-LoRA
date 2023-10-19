@@ -16,6 +16,7 @@ def train_one_epoch(model:torch.nn.Module,
                     losses_forget:util.AverageMeter,
                     losses_remain:util.AverageMeter,
                     losses_total:util.AverageMeter,
+                    losses_structure:util.AverageMeter,
                     top1_forget:util.AverageMeter,
                     top1_remain:util.AverageMeter,
                     beta:float,
@@ -36,37 +37,39 @@ def train_one_epoch(model:torch.nn.Module,
     prefetcher_forget = data_prefetcher(dataloader_forget, device, prefetch=True)
     inputs_forget, labels_forget = prefetcher_forget.next() # 已经将数据移动到GPU上了
 
-    DISP_FREQ = 1
-    VER_FREQ = 1
+    DISP_FREQ = 3
+    VER_FREQ = 3
     # import pdb; pdb.set_trace()
     for inputs_remain, labels_remain in iter(dataloader_remain):
         inputs_remain = inputs_remain.to(device)
         labels_remain = labels_remain.to(device)
-        outputs_remain, emb_remain = model(inputs_remain.float(), labels_remain)
+        outputs_remain = model(inputs_remain.float())
 
         # compute remain loss
         loss_remain = criterion(outputs_remain, labels_remain)
         prec1_remain = train_accuracy(outputs_remain.data, labels_remain, topk=(1,))
-
+        # import pdb; pdb.set_trace() 
         losses_remain.update(loss_remain.data.item(),inputs_remain.size(0))
         top1_remain.update(prec1_remain.data.item(), inputs_remain.size(0))
 
-        outputs_forget, emb_forget = model(inputs_forget.float(), labels_forget)
+        outputs_forget = model(inputs_forget.float())
         # compute forget loss
         loss_forget = criterion(outputs_forget, labels_forget)
         prec1_forget = train_accuracy(outputs_forget.data, labels_forget, topk=(1,))
         
-        loss_forget = torch.functional.F.relu(BND-loss_forget) # bounded loss
-        losses_forget.update(loss_forget.data.item(), inputs_forget.size(0))
+        loss_forget = -loss_forget # maximize the loss
+        # loss_forget = torch.functional.F.relu(BND-loss_forget) # bounded loss
+        losses_forget.update(beta*loss_forget.data.item(), inputs_forget.size(0))
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
 
         # compute structure loss
         structure_loss = get_structure_loss(model)
+        losses_structure.update(alpha*structure_loss.data.item(), inputs_remain.size(0))
         # compute regularization loss
 
         # compute total loss
         loss_total = loss_forget * beta + loss_remain + structure_loss * alpha
-        losses_total.update(loss_total.data.item(), inputs_forget.size(0))
+        losses_total.update(loss_total.data.item(), inputs_remain.size(0))
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss_total.backward()
@@ -76,18 +79,21 @@ def train_one_epoch(model:torch.nn.Module,
         if ((batch+1)%DISP_FREQ ==0) and batch != 0:
             epoch_loss_forget = losses_forget.avg
             epoch_loss_remain = losses_remain.avg
-
+            epoch_loss_total = losses_total.avg
             epoch_acc_forget = top1_forget.avg
             epoch_acc_remain = top1_remain.avg
 
             wandb.log({"epoch_loss_forget": epoch_loss_forget,
                           "epoch_loss_remain": epoch_loss_remain,
                           "epoch_acc_forget": epoch_acc_forget,
-                          "epoch_acc_remain": epoch_acc_remain}, step=batch+1)
+                          "epoch_acc_remain": epoch_acc_remain,
+                          "epoch_loss_total":epoch_loss_total}, step=batch+1)
 
             print('Epoch {} Batch {}\t'
                       'Training forget Loss {loss_forget.val:.4f} ({loss_forget.avg:.4f})\t'
                       'Training remain Loss {loss_remain.val:.4f} ({loss_remain.avg:.4f})\t'
+                      'Training structure Loss {loss_structure.val:.4f} ({loss_structure.avg:.4f})\t'
+                      'Training total Loss {loss_total.val:.4f} ({loss_total.avg:.4f})\t'
                       'Training forget Prec@1 {top1_forget.val:.3f} ({top1_forget.avg:.3f})\t'
                       'Training remain Prec@1 {top1_remain.val:.3f} ({top1_remain.avg:.3f})'.format(
                           epoch + 1,
@@ -95,7 +101,9 @@ def train_one_epoch(model:torch.nn.Module,
                           loss_forget=losses_forget,
                             loss_remain=losses_remain,
                           top1_forget=top1_forget,
-                            top1_remain=top1_remain))
+                            top1_remain=top1_remain,
+                            loss_structure=losses_structure,
+                            loss_total=losses_total))
             
             # reset average meters
             losses_forget = util.AverageMeter()
@@ -103,6 +111,7 @@ def train_one_epoch(model:torch.nn.Module,
             top1_forget = util.AverageMeter()
             top1_remain = util.AverageMeter()
             losses_total = util.AverageMeter()
+            losses_structure = util.AverageMeter()
 
         if ((batch+1)%VER_FREQ ==0) and batch != 0:
             highest_H_mean=evaluate(model, testloader_forget,testloader_remain, device, batch, epoch,
@@ -117,8 +126,10 @@ def train_one_epoch(model:torch.nn.Module,
             prefetcher_forget = data_prefetcher(dataloader_forget, device, prefetch=True)
             inputs_forget, labels_forget = prefetcher_forget.next()
 
-    return batch, highest_H_mean
+    return batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure
 
+def train_one_epoch_regularzation(model:torch.nn.Module,):
+    pass
 def evaluate(model:torch.nn.Module,
              testloader_forget:torch.utils.data.DataLoader,
              testloader_remain:torch.utils.data.DataLoader,
@@ -176,6 +187,7 @@ def eval_data(model:torch.nn.Module,
     '''
     correct = 0
     total = 0
+    model.eval()
     with torch.no_grad():
         for images, labels in dataloader:
             images = images.to(device)
