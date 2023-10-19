@@ -58,7 +58,7 @@ def get_config(args):
     configuration['ewc'] = args.ewc
     configuration['ewc_lambda'] = args.ewc_lambda
     configuration['MAS'] = args.MAS
-    configuration['MAS_lambda'] = args.MAS_lambda
+    configuration['mas_lambda'] = args.mas_lambda
     configuration['si'] = args.si
     configuration['si_c'] = args.si_c
     configuration['online'] = args.online
