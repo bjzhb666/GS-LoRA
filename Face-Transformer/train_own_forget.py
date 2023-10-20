@@ -245,7 +245,6 @@ if __name__ == '__main__':
 
     SEED = cfg['SEED']  # random seed for reproduce results
     torch.manual_seed(SEED)
-    random_generator = torch.Generator().manual_seed(SEED)
 
     DATA_ROOT = cfg[
         'DATA_ROOT']  # the parent root where your train/val/test data are stored
@@ -304,7 +303,8 @@ if __name__ == '__main__':
     order_list = list(range(NUM_CLASS))
     # shuffle order list
     import random
-    random.shuffle(order_list, generator=random_generator)
+    random.seed(SEED)
+    random.shuffle(order_list)
     print('order_list', order_list)
     
     # split datasets
@@ -415,8 +415,8 @@ if __name__ == '__main__':
     print("{} Backbone Generated".format(BACKBONE_NAME))
     print("=" * 60)
 
-    LOSS = LossFaceCE(type=HEAD_NAME,dim=512,num_class=NUM_CLASS, GPU_ID=GPU_ID)
-
+    # LOSS = LossFaceCE(type=HEAD_NAME,dim=512,num_class=NUM_CLASS, GPU_ID=GPU_ID)
+    LOSS = nn.CrossEntropyLoss()
     #embed()
     OPTIMIZER = create_optimizer(args, BACKBONE)
     print("=" * 60)
@@ -432,7 +432,17 @@ if __name__ == '__main__':
         if os.path.isfile(BACKBONE_RESUME_ROOT):
             print("Loading Backbone Checkpoint '{}'".format(
                 BACKBONE_RESUME_ROOT))
-            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+            missing_keys, unexpected_keys=BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+            if len(missing_keys) > 0:
+                print('Missing keys: {}'.format(missing_keys))
+                print('\n')
+                for missing_key in missing_keys:
+                    if 'lora' not in missing_key:
+                        print("\033[31mWrong resume.\033[0m")
+                        exit()
+            if len(unexpected_keys) > 0:
+                print('Unexpected keys: {}'.format(unexpected_keys))
+                print('\n')
         else:
             print(
                 "No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch"
@@ -483,6 +493,12 @@ if __name__ == '__main__':
     model_without_ddp = BACKBONE.module if MULTI_GPU else BACKBONE
 
     # eval before training
+    print("Perform Evaluation on forget train set and remain train set...")
+    forget_acc_train_before = eval_data(BACKBONE, train_loader_forget, DEVICE, 'forget-train', batch)
+    remain_acc_train_before = eval_data(BACKBONE, train_loader_remain, DEVICE, 'remain-train', batch)
+    print('forget_acc_train_before', forget_acc_train_before)
+    print('remain_acc_train_before', remain_acc_train_before)
+    print('\n')
     print("Perform Evaluation on forget test set and remain test set...")
     forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, 'forget', batch)
     remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain', batch)
@@ -517,6 +533,7 @@ if __name__ == '__main__':
             cfg=cfg,
             alpha=args.alpha)
         # print(batch)
-
+    # TODO: calculate norm list
+    # TODO: visulize the structure loss
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)

@@ -43,16 +43,16 @@ def train_one_epoch(model:torch.nn.Module,
     for inputs_remain, labels_remain in iter(dataloader_remain):
         inputs_remain = inputs_remain.to(device)
         labels_remain = labels_remain.to(device)
-        outputs_remain = model(inputs_remain.float())
+        outputs_remain, embeds_remain = model(inputs_remain.float(), labels_remain)
 
         # compute remain loss
         loss_remain = criterion(outputs_remain, labels_remain)
         prec1_remain = train_accuracy(outputs_remain.data, labels_remain, topk=(1,))
         # import pdb; pdb.set_trace() 
-        losses_remain.update(loss_remain.data.item(),inputs_remain.size(0))
+        losses_remain.update(loss_remain.data.item(), inputs_remain.size(0))
         top1_remain.update(prec1_remain.data.item(), inputs_remain.size(0))
 
-        outputs_forget = model(inputs_forget.float())
+        outputs_forget, embeds_forget = model(inputs_forget.float(), labels_forget)
         # compute forget loss
         loss_forget = criterion(outputs_forget, labels_forget)
         prec1_forget = train_accuracy(outputs_forget.data, labels_forget, topk=(1,))

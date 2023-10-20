@@ -150,7 +150,7 @@ class CosFace(nn.Module):
         self.s = s
         self.m = m
         print("self.device_id", self.device_id)
-        self.weight = Parameter(torch.FloatTensor(out_features, in_features))
+        self.weight = Parameter(torch.FloatTensor(out_features, in_features)) # 相当于最后全连接层的权重
         nn.init.xavier_uniform_(self.weight)
 
     def forward(self, input, label):
@@ -376,6 +376,9 @@ class ViT_face(nn.Module):
                 self.loss = SFaceLoss(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
 
     def forward(self, img, label= None , mask = None):
+        """
+        :return: output 是经过FFN后的特征向量（或者为了特定的loss有其他运算），emb是经过transformer后的特征向量
+        """
         p = self.patch_size
 
         x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
