@@ -5,6 +5,7 @@ from util.data_prefetcher import data_prefetcher
 import wandb
 from util.utils import get_time
 import os
+from IPython import embed
 
 def train_one_epoch(model:torch.nn.Module,
                     dataloader_forget:torch.utils.data.DataLoader,
@@ -58,6 +59,7 @@ def train_one_epoch(model:torch.nn.Module,
         prec1_forget = train_accuracy(outputs_forget.data, labels_forget, topk=(1,))
         
         loss_forget = -loss_forget # maximize the loss
+        # embed() # debug
         # loss_forget = torch.functional.F.relu(BND-loss_forget) # bounded loss
         losses_forget.update(beta*loss_forget.data.item(), inputs_forget.size(0))
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
@@ -114,8 +116,9 @@ def train_one_epoch(model:torch.nn.Module,
             losses_structure = util.AverageMeter()
 
         if ((batch+1)%VER_FREQ ==0) and batch != 0:
-            highest_H_mean=evaluate(model, testloader_forget,testloader_remain, device, batch, epoch,
-                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg)
+            highest_H_mean=evaluate(model, testloader_forget=testloader_forget,testloader_remain=testloader_remain, 
+                                    device=device, batch=batch, epoch=epoch,
+                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
             model.train()
 
         batch+=1
@@ -138,8 +141,13 @@ def evaluate(model:torch.nn.Module,
              epoch:int,
              forget_acc_before:float,
              highest_H_mean:float,
-             cfg:dict):
+             cfg:dict,
+             optimizer:torch.optim.Optimizer):
     model.eval()
+    for params in optimizer.param_groups:
+        lr = params['lr']
+        break
+    print("current learning rate:{:.7f}".format(lr))
     print("Perfom evaluation on test set and save checkpoints...")
     
 
