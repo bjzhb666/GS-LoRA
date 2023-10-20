@@ -25,32 +25,7 @@ from torch.utils.data import Subset
 
 from IPython import embed
 
-from vit_pytorch_face.vit_face import CosFace, ArcFace, Softmax, SFaceLoss
-class LossFaceCE(nn.Module):
-    """
-    combine the face loss and the LOSS (nn.CrossEntropyLoss())
-    """
-    def __init__(self, type, dim, num_class, GPU_ID) -> None:
-        super().__init__()
-        self.loss_type = type
-        self.GPU_ID = GPU_ID
-
-        if self.loss_type == 'Softmax':
-            self.loss = Softmax(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
-        elif self.loss_type == 'CosFace':
-            self.loss = CosFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
-        elif self.loss_type == 'ArcFace':
-            self.loss = ArcFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
-        elif self.loss_type == 'SFace':
-            self.loss = SFaceLoss(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
-        self.CEloss = nn.CrossEntropyLoss()
-
-
-    def forward(self, preds, labels):
-        face_loss = self.loss(preds, labels)
-        loss = self.CEloss(face_loss, labels)
-        return loss
-
+from util.cal_norm import get_norm_of_lora
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -277,7 +252,7 @@ if __name__ == '__main__':
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
     wandb.init(project="face recognition",
-               group='casia100',
+               group='forget-find',
                mode="offline" if args.wandb_offline else "online")
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
@@ -533,7 +508,9 @@ if __name__ == '__main__':
             cfg=cfg,
             alpha=args.alpha)
         # print(batch)
-    # TODO: calculate norm list
-    # TODO: visulize the structure loss
+        # calculate norm list
+        norm_list = get_norm_of_lora(model_without_ddp, type='L2')
+        wandb.log({"norm_list": norm_list})
+    # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)
