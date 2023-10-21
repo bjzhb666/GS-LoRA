@@ -38,8 +38,8 @@ def train_one_epoch(model:torch.nn.Module,
     prefetcher_forget = data_prefetcher(dataloader_forget, device, prefetch=True)
     inputs_forget, labels_forget = prefetcher_forget.next() # 已经将数据移动到GPU上了
 
-    DISP_FREQ = 3
-    VER_FREQ = 3
+    DISP_FREQ = 5
+    VER_FREQ = 5
     # import pdb; pdb.set_trace()
     for inputs_remain, labels_remain in iter(dataloader_remain):
         inputs_remain = inputs_remain.to(device)
