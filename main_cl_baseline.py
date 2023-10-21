@@ -471,6 +471,24 @@ def main(args):
                                         collate_fn=utils.collate_fn,
                                         num_workers=args.num_workers,
                                         pin_memory=True)
+        if task_i == 0:
+            # we need a dataloader that combines all the classes to calculate the importance matrix
+            dataset_importance = torch.utils.data.ConcatDataset([dataset_remain, dataset_forget])
+            if args.distributed:
+                if args.cache_mode:
+                    sampler_importance = samplers.NodeDistributedSampler(dataset_importance)
+                else:
+                    sampler_importance = samplers.DistributedSampler(dataset_importance)
+            else:
+                sampler_importance = torch.utils.data.RandomSampler(dataset_importance)
+            batch_sampler_importance = torch.utils.data.BatchSampler(sampler_importance,
+                                                            args.batch_size,
+                                                            drop_last=False)
+            data_loader_importance = DataLoader(dataset_importance,
+                                        batch_sampler=batch_sampler_importance,
+                                        collate_fn=utils.collate_fn,
+                                        num_workers=args.num_workers,
+                                        pin_memory=True)
         if args.replay:
             data_loader_total = DataLoader(dataset_total,
                                             batch_sampler=batch_sampler_total,
@@ -646,7 +664,7 @@ def main(args):
                         return importance
                 
                 # 2. calculate the importance matrix and get the regularization terms
-                importance = calculate_importance_l2(model_without_ddp, data_loader_remain)
+                importance = calculate_importance_l2(model_without_ddp, data_loader_importance)
                 regularization_terms[0] = {'importance':importance, 'task_param':task_param}
 
             # 1. learn the current task
@@ -775,7 +793,7 @@ def main(args):
                     model.train()
                     return importance
                 
-                importance = calculate_importance_ewc(model_without_ddp, data_loader_remain)
+                importance = calculate_importance_ewc(model_without_ddp, data_loader_importance)
                 regularization_terms[0] = {'importance':importance, 'task_param':task_param}
 
             # 1. learn the current task
@@ -831,7 +849,23 @@ def main(args):
                 wandb.log({'time': total_time_str})
                 
         if args.si:
-            pass
+            print("start si training in task", task_i)
+            start_time = time.time()
+
+            # reinitialize the optimizer
+            if args.sgd:
+                optimizer = torch.optim.SGD(param_dicts,
+                                        lr=args.lr,
+                                        momentum=0.9,
+                                        weight_decay=args.weight_decay)
+            else:
+                optimizer = torch.optim.AdamW(param_dicts,
+                                            lr=args.lr,
+                                            weight_decay=args.weight_decay)
+                
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
+                                                        args.lr_drop)
+            
 
         if args.MAS:
             print("start mas training in task", task_i)
@@ -893,7 +927,7 @@ def main(args):
                     model.train()
                     return importance    
                 
-                importance = calculate_importance_mas(model_without_ddp, data_loader_remain)
+                importance = calculate_importance_mas(model_without_ddp, data_loader_importance)
                 regularization_terms[0] = {'importance':importance, 'task_param':task_param}
 
             # 1. learn the current task

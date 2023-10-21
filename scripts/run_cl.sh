@@ -15,7 +15,7 @@ do
                 --lora_encoder_layers  0 1 2 3 4 5 --lora_decoder_layers  0 1 2 3 4 5 --beta $beta\
                 --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE  --no_aux_loss \
                 --lora_reg_rank 0 --lora_cls_rank 0 --alpha $alpha --seed_cls 123  \
-                --num_tasks 7 --cl_beta_list 0.015 0.03 0.025 0.03 0.04 0.1 0.2
+                --num_tasks 7 --cl_beta_list 0.015 0.03 0.14 0.13 0.13 0.15 0.15
 done
 done
 

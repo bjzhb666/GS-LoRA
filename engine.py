@@ -355,7 +355,15 @@ def train_one_epoch_forget_cls(model:torch.nn.Module, criterion:torch.nn.Module,
         outputs_forget = model(samples_forget)
         loss_dict_forget = criterion(outputs_forget, targets_forget)
         weight_dict_forget = criterion.forget_weight_dict
-        losses_forget = sum(loss_dict_forget[k] * weight_dict_forget[k] for k in loss_dict_forget.keys() if k in weight_dict_forget)
+        losses_forget = 0
+        BND = 15
+        for k in loss_dict_forget.keys():
+            if k in weight_dict_forget:
+                if weight_dict_forget[k] < 0:
+                    losses_forget += torch.functional.F.relu(BND+loss_dict_forget[k] * weight_dict_forget[k])
+                else:
+                    losses_forget += loss_dict_forget[k] * weight_dict_forget[k]
+        # losses_forget = sum(loss_dict_forget[k] * weight_dict_forget[k] for k in loss_dict_forget.keys() if k in weight_dict_forget)
         structure_loss = group_sparse_loss(model)
         losses_total = beta * losses_forget + losses_remain + alpha * structure_loss
 
