@@ -60,9 +60,9 @@ def train_one_epoch(model:torch.nn.Module,
         loss_forget = criterion(outputs_forget, labels_forget)
         prec1_forget = train_accuracy(outputs_forget.data, labels_forget, topk=(1,))
 
-        loss_forget = -loss_forget # maximize the loss
+        # loss_forget = -loss_forget # maximize the loss
         # embed() # debug
-        # loss_forget = torch.functional.F.relu(BND-loss_forget) # bounded loss
+        loss_forget = torch.functional.F.relu(BND-loss_forget) # bounded loss
         losses_forget.update(beta*loss_forget.data.item(), inputs_forget.size(0))
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
 
@@ -214,7 +214,7 @@ def eval_data(model:torch.nn.Module,
     # 打印测试精度
     accuracy = 100 * correct / total
     print('Test {} Accuracy:{:2f}%'.format(mode, accuracy))
-    wandb.log({"Test {} Accuracy".format(mode): accuracy}, step=batch+1)
+    wandb.log({"Test {} Accuracy".format(mode): accuracy})
 
     return accuracy
 

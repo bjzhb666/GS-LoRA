@@ -206,6 +206,7 @@ if __name__ == '__main__':
     # mode selection
     parser.add_argument('--one_stage',default=True, action='store_false', help='whether to use one stage training')
     parser.add_argument('--l2',default=False, action='store_true', help='whether to use l2 norm')
+    parser.add_argument('--l2_lambda',default=0.1, type=float, help='lambda for l2 norm')
     parser.add_argument('--ewc',default=False, action='store_true', help='whether to use ewc')
     parser.add_argument('--ewc_lambda',default=0.1, type=float, help='lambda for ewc')
     parser.add_argument('--MAS', default=False, action='store_true', help='whether to use mas')
@@ -520,15 +521,18 @@ if __name__ == '__main__':
 
         batch = 0  # batch index
 
-        losses_forget = AverageMeter()
-        top1_forget = AverageMeter()
-        losses_remain = AverageMeter()
-        top1_remain = AverageMeter()
-        losses_total = AverageMeter()
-        losses_structure = AverageMeter()
-
+        if args.one_stage:
+            losses_forget = AverageMeter()
+            top1_forget = AverageMeter()
+            losses_remain = AverageMeter()
+            top1_remain = AverageMeter()
+            losses_total = AverageMeter()
+            losses_structure = AverageMeter()
+        else: # CL baselines
+            losses_CE = AverageMeter()
+            losses_reg = AverageMeter()
+            losses_total = AverageMeter()
         
-
         # eval before training
         print("Perform Evaluation on forget train set and remain train set...")
         forget_acc_train_before = eval_data(BACKBONE, train_loader_forget, DEVICE, 'forget-train-{}'.format(task_i), batch)
@@ -700,13 +704,58 @@ if __name__ == '__main__':
                     regularization_terms[0] = {'importance':importance, 'task_param':task_param}
 
             # 1. learn current task
-            epoch = 0           
+            epoch = 0    
+            if args.l2:
+                reg_lambda = args.l2_lambda
+            elif args.ewc:
+                reg_lambda = args.ewc_lambda
+            elif args.MAS:
+                reg_lambda = args.mas_lambda
+            
             for epoch in range(NUM_EPOCH):
                 lr_scheduler.step(epoch)
                 if args.replay:
-                    train_one_epoch_regularzation()
+                    batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
+                        model=BACKBONE,
+                        criterion=LOSS,
+                        data_loader_cl_forget=train_loader_total,
+                        optimizer=OPTIMIZER,
+                        device=DEVICE,
+                        epoch=epoch,
+                        batch=batch,
+                        reg_lambda=reg_lambda,
+                        regularization_terms=regularization_terms,
+                        losses_CE=losses_CE,
+                        losses_reg=losses_reg,
+                        losses_total=losses_total,
+                        task_i=task_i,
+                        testloader_forget=testloader_forget,
+                        testloader_remain=testloader_remain,
+                        highest_H_mean=highest_H_mean,
+                        forget_acc_before=forget_acc_before,
+                        cfg=cfg,
+                    )
                 else:
-                    train_one_epoch_regularzation()
+                    batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
+                        model=BACKBONE,
+                        criterion=LOSS,
+                        data_loader_cl_forget= train_loader_forget,
+                        optimizer=OPTIMIZER,
+                        device=DEVICE,
+                        epoch=epoch,
+                        batch=batch,
+                        reg_lambda=reg_lambda,
+                        regularization_terms=regularization_terms,
+                        losses_CE=losses_CE,
+                        losses_reg=losses_reg,
+                        losses_total=losses_total,
+                        task_i=task_i,
+                        testloader_forget=testloader_forget,
+                        testloader_remain=testloader_remain,
+                        highest_H_mean=highest_H_mean,
+                        forget_acc_before=forget_acc_before,
+                        cfg=cfg,
+                    )
             # 2. Backup the weight of current task
             task_param={}
             model_without_ddp = BACKBONE.module if MULTI_GPU else BACKBONE
@@ -715,7 +764,17 @@ if __name__ == '__main__':
                     task_param[n] = p.clone().detach()
 
             # 3. Calculate the Information Matrix and get the regularization terms
-            
+            if args.l2:
+                importance = calculate_importance_l2(model_without_ddp, dataloader=train_loader_remain)
+            elif args.ewc:
+                importance = calculate_importance_ewc(model_without_ddp, dataloader=train_loader_remain)
+            elif args.MAS:
+                importance = calculate_importance_mas(model_without_ddp, dataloader=train_loader_remain)
+            if args.online and len(regularization_terms) > 0:
+                regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+            else:
+                regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
+        
         # test for old classes after training task_i
         if task_i > 0:
             old_acc = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
