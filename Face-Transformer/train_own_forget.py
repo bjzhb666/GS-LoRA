@@ -508,9 +508,9 @@ if __name__ == '__main__':
             cfg=cfg,
             alpha=args.alpha)
         # print(batch)
-        # calculate norm list
-        norm_list = get_norm_of_lora(model_without_ddp, type='L2')
-        wandb.log({"norm_list": norm_list})
+    # calculate norm list
+    norm_list = get_norm_of_lora(model_without_ddp, type='L2')
+    wandb.log({"norm_list": norm_list})
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
-    +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)
+    +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)+'BND'+str(args.BND)+'alpha'+str(args.alpha)

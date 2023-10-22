@@ -139,6 +139,36 @@ class Wrapper10Dataset(Dataset):
 
         return class_samples[target_count]
 
+class CLDatasetWrapper(Dataset):
+    '''
+    modify the label of the original dataset to make it different from the original label
+    '''
+    def __init__(self, original_dataset):
+        self.original_dataset = original_dataset
+
+    def __getitem__(self, index):
+        image, label = self.original_dataset[index]
+
+        # Modify the label
+        modified_label = self.modify_label(label)
+
+        return image, modified_label
+
+    def __len__(self):
+        return len(self.original_dataset)
+
+    def modify_label(self, label):
+        # Modify the label to make it different from the original label
+        # Randomly generate a positive integer
+        random_int = random.randint(1, 100)
+        modified_label = label + random_int  # You can define your own modification rule here
+
+        # Ensure the modified label is not equal to the original label
+        modified_label = modified_label % len(self.original_dataset.classes)
+        if modified_label == label:
+            modified_label = (label + 1) % len(self.original_dataset.classes)
+
+        return modified_label
 
 if __name__ == '__main__':
     root = './data/faces_webface_112x112/train.rec'
