@@ -7,7 +7,7 @@ import torchvision.datasets as datasets
 import wandb
 
 from config import get_config
-from image_iter import CLDatasetWrapper
+from image_iter import CLDatasetWrapper, CustomSubset
 
 from util.utils import separate_irse_bn_paras, separate_resnet_bn_paras, separate_mobilefacenet_bn_paras
 from util.utils import get_val_data, perform_val, get_time, buffer_val, AverageMeter, train_accuracy
@@ -215,7 +215,7 @@ if __name__ == '__main__':
     parser.add_argument('--si_c', default=0.1, type=float, help='c for si')
     parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
-    
+    parser.add_argument('--n_fisher_sample', default=None, type=int, help='number of fisher sample')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     args = parser.parse_args()
@@ -388,7 +388,7 @@ if __name__ == '__main__':
 
     for task_i in range(args.num_tasks):
         print('\n')
-        print('\033[34m================task:{}==================\033[0m'.format(task_i)) # blue
+        print('\033[34m=========================task:{}==============================\033[0m'.format(task_i)) # blue
         print('\n')
         # split datasets
         # 1. calculate st1, en1, st2, en2
@@ -425,8 +425,8 @@ if __name__ == '__main__':
         subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
         subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
 
-        forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
-        remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
+        forget_dataset_train_sub = CustomSubset(forget_dataset_train, subset_indices_forget)
+        remain_dataset_train_sub = CustomSubset(remain_dataset_train, subset_indices_remain)
 
         if task_i == 0:
             # create importance dataset and dataloader
@@ -604,7 +604,7 @@ if __name__ == '__main__':
                 if args.l2:
                     def calculate_importance_l2(model, dataloader):
                         # Use an identity importance so it is an L2 regularization.
-                        print("calculate_importance_l2")
+                        print("\033[32mcalculate_importance_l2\033[0m")
                         importance = {}
                         for n, p in model.named_parameters():
                             if p.requires_grad:
@@ -616,7 +616,7 @@ if __name__ == '__main__':
                 
                 elif args.ewc:
                     def calculate_importance_ewc(model, dataloader):
-                        print('calculate importance of ewc...')
+                        print('\033[32mcalculate importance of ewc...\033[0m')
 
                         # Initialize the importance matrix
                         if args.online and len(regularization_terms) > 0:
@@ -657,7 +657,7 @@ if __name__ == '__main__':
                             losses.backward()
                             for n,p in importance.items():
                                 if parms_without_ddp[n].grad is not None: # some parameters may not have grad
-                                    p +=((parms_without_ddp[n].grad**2)*len(samples.tensors)/len(subdataloader))
+                                    p +=((parms_without_ddp[n].grad**2)*len(samples)/len(subdataloader))
                         
                         model.train()
                         return importance
@@ -667,7 +667,7 @@ if __name__ == '__main__':
 
                 elif args.MAS:
                     def calculate_importance_mas(model, dataloader):
-                        print('calculate importance of mas...')
+                        print('\033[32mcalculate importance of mas...\033[0m')
 
                         # Initialize the importance matrix
                         if args.online and len(regularization_terms) > 0:
@@ -726,7 +726,7 @@ if __name__ == '__main__':
                         reg_lambda=reg_lambda,
                         regularization_terms=regularization_terms,
                         losses_CE=losses_CE,
-                        losses_reg=losses_reg,
+                        losses_regularization=losses_reg,
                         losses_total=losses_total,
                         task_i=task_i,
                         testloader_forget=testloader_forget,
@@ -747,7 +747,7 @@ if __name__ == '__main__':
                         reg_lambda=reg_lambda,
                         regularization_terms=regularization_terms,
                         losses_CE=losses_CE,
-                        losses_reg=losses_reg,
+                        losses_regularization=losses_reg,
                         losses_total=losses_total,
                         task_i=task_i,
                         testloader_forget=testloader_forget,

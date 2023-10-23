@@ -23,6 +23,7 @@ import logging
 import numbers
 import random
 from torch.utils.data import Dataset
+from torch.utils.data import Subset
 
 logger = logging.getLogger()
 
@@ -170,6 +171,20 @@ class CLDatasetWrapper(Dataset):
 
         return modified_label
 
+class CustomSubset(Subset):
+    '''A custom subset class'''
+    def __init__(self, dataset, indices):
+        super().__init__(dataset, indices)
+        self.targets = dataset.targets # 保留targets属性
+        self.classes = dataset.classes # 保留classes属性
+
+    def __getitem__(self, idx): #同时支持索引访问操作
+        x, y = self.dataset[self.indices[idx]]      
+        return x, y 
+
+    def __len__(self): # 同时支持取长度操作
+        return len(self.indices)
+    
 if __name__ == '__main__':
     root = './data/faces_webface_112x112/train.rec'
     embed()

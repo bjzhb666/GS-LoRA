@@ -213,6 +213,9 @@ if __name__ == '__main__':
     parser.add_argument('--si_c', default=0.1, type=float, help='c for si')
     parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
+    # wramup for alpha
+    parser.add_argument('--warmup_alpha', default=False, action='store_true', help='whether to use warmup_alpha')
+    parser.add_argument('--big_alpha', default=0.0005, type=float, help='big alpha for warmup_alpha')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -481,7 +484,11 @@ if __name__ == '__main__':
                 "remain_acc_before": remain_acc_before})
     BACKBONE.train()  # set to training mode
     for epoch in range(NUM_EPOCH):  # start training process
-
+        if args.warmup_alpha:
+            if epoch < 20:
+                args.alpha=0
+            else:
+                args.alpha=args.big_alpha
         lr_scheduler.step(epoch)
 
         batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure = train_one_epoch(
@@ -514,3 +521,5 @@ if __name__ == '__main__':
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)+'BND'+str(args.BND)+'alpha'+str(args.alpha)
+    if args.warmup_alpha:
+        wandb.run.name = wandb.run.name + '-warmup_alpha'+str(args.big_alpha)

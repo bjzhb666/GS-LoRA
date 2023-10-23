@@ -93,7 +93,7 @@ def train_one_epoch(model:torch.nn.Module,
                           "epoch_acc_forget-{}".format(task_i): epoch_acc_forget,
                           "epoch_acc_remain-{}".format(task_i): epoch_acc_remain,
                           "epoch_loss_total-{}".format(task_i):epoch_loss_total,
-                          "epoch_loss_structure-{}".format(task_i):epoch_loss_structure}, step=batch+1)
+                          "epoch_loss_structure-{}".format(task_i):epoch_loss_structure})
 
             print('Task {} Epoch {} Batch {}\t'
                       'Training forget Loss {loss_forget.val:.4f} ({loss_forget.avg:.4f})\t'
@@ -161,7 +161,7 @@ def evaluate(model:torch.nn.Module,
     remain_acc = eval_data(model, testloader_remain, device, 'remain-{}'.format(task_i), batch)
 
     forget_drop = forget_acc_before - forget_acc
-    Hmean = 2*forget_drop*remain_acc/(forget_drop+remain_acc)
+    Hmean = 2*forget_drop*remain_acc/(forget_drop+remain_acc+1e-8)
 
     # save checkpoints per epoch
     if Hmean > highest_H_mean:
@@ -288,16 +288,16 @@ def get_structure_loss(model:torch.nn.Module):
     # print('group_sparse_loss', group_sparse_loss)
     return group_sparse_loss
 
-def get_reg_loss(model:torch.nn.Module, regularization_terms:dict, reg_lambda:float):
-    l2_loss = torch.tensor(0.0, device=model.device)
+def get_reg_loss(model:torch.nn.Module, regularization_terms:dict, reg_lambda:float, device:torch.device):
+    l2_loss = torch.tensor(0.0, device=device)
     if isinstance(model, torch.nn.DataParallel):
         model_without_ddp = model.module
     else:
         model_without_ddp = model
     
-    reg_loss = torch.tensor(0.0, device=model.device)
+    reg_loss = torch.tensor(0.0, device=device)
     for i, reg_term in regularization_terms.items():
-        task_reg_loss = torch.tensor(0.0, device=model.device)
+        task_reg_loss = torch.tensor(0.0, device=device)
         importance = reg_term['importance']
         task_param = reg_term['task_param']
         
@@ -345,7 +345,7 @@ def train_one_epoch_regularzation(
         losses_CE.update(loss_forget.data.item(), inputs_forget.size(0))
 
         # compute regularization loss
-        regularization_loss = get_reg_loss(model, regularization_terms, reg_lambda)
+        regularization_loss = get_reg_loss(model, regularization_terms, reg_lambda, device)
         losses_regularization.update(regularization_loss.data.item(), inputs_forget.size(0))
         
         losses = regularization_loss + loss_forget
@@ -363,7 +363,7 @@ def train_one_epoch_regularzation(
 
             wandb.log({"epoch_loss_CE-{}".format(task_i): epoch_loss_CE,
                             "epoch_loss_regularization-{}".format(task_i): epoch_loss_regularization,
-                            "epoch_loss_total-{}".format(task_i):epoch_loss_total}, step=batch+1)
+                            "epoch_loss_total-{}".format(task_i):epoch_loss_total})
             
             print('Task {} Epoch {} Batch {}\t'
                         'Training CE Loss {loss_CE.val:.4f} ({loss_CE.avg:.4f})\t'
