@@ -699,6 +699,12 @@ def main(args):
                     base_ds_remain, device, args.output_dir)
                 utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=l2_epoch+1)
 
+                if task_i > 0:
+                    print("l2 regularization training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=l2_epoch+1)
             # 2. Backup the weight of current task
             task_param = {}
             model_without_ddp = model.module
@@ -827,6 +833,12 @@ def main(args):
                     base_ds_remain, device, args.output_dir)
                 utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=ewc_epoch+1)
 
+                if task_i > 0:
+                    print("ewc regularization training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=ewc_epoch+1)
             # 2. Backup the weight of current task
             task_param = {}
             model_without_ddp = model.module
@@ -961,6 +973,13 @@ def main(args):
                     base_ds_remain, device, args.output_dir)
                 utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=mas_epoch+1)
 
+                if task_i > 0:
+                    print("mas regularization training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=mas_epoch+1)
+                    
             # 2. Backup the weight of current task
             task_param = {}
             model_without_ddp = model.module
