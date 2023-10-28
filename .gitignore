@@ -5,3 +5,4 @@ InsightFace_Pytorch/
 Face-Transformer/Fresults/
 Face-Transformer/__pycache__/
 Face-Transformer/wandb/
+Face-Transformer/test-Tsne/
