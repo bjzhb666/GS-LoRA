@@ -189,6 +189,7 @@ if __name__ == '__main__':
         default=False,
         action='store_true',
     )
+    parser.add_argument('--wandb_group', default=None, type=str, help='wandb group name')
     # VIT depth
     parser.add_argument('--vit_depth',
                         type=int,
@@ -218,6 +219,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_fisher_sample', default=None, type=int, help='number of fisher sample')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
+    parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -257,7 +259,7 @@ if __name__ == '__main__':
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
     wandb.init(project="face recognition",
-               group='forget-find',
+                group=args.wandb_group,
                mode="offline" if args.wandb_offline else "online")
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
@@ -553,6 +555,7 @@ if __name__ == '__main__':
         parms_without_ddp = {n:p for n,p in model_without_ddp.named_parameters() if p.requires_grad} # for convenience
         
         if args.one_stage:
+            cl_beta = args.cl_beta_list[task_i]
             BACKBONE.train()  # set to training mode
             print("start one stage forget remain training...")
             epoch = 0 # 清零以免影响后面task的epoch计算
@@ -577,7 +580,7 @@ if __name__ == '__main__':
                     top1_remain=top1_remain,
                     losses_total=losses_total,
                     losses_structure=losses_structure,
-                    beta=args.beta,
+                    beta=cl_beta,
                     BND=args.BND,
                     forget_acc_before=forget_acc_before,
                     highest_H_mean=highest_H_mean,

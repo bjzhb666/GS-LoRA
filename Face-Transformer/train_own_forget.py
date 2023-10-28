@@ -216,6 +216,10 @@ if __name__ == '__main__':
     # wramup for alpha
     parser.add_argument('--warmup_alpha', default=False, action='store_true', help='whether to use warmup_alpha')
     parser.add_argument('--big_alpha', default=0.0005, type=float, help='big alpha for warmup_alpha')
+    # beta decay
+    parser.add_argument('--beta_decay', default=False, action='store_true', help='whether to use beta_decay')
+    parser.add_argument('--small_beta', default=1e-4, type=float, help='small beta for beta_decay')
+    parser.add_argument('--wandb_group', default=None, type=str, help='wandb group name')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -255,7 +259,7 @@ if __name__ == '__main__':
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
     wandb.init(project="face recognition",
-               group='forget-find',
+               group=args.wandb_group,
                mode="offline" if args.wandb_offline else "online")
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
@@ -485,10 +489,15 @@ if __name__ == '__main__':
     BACKBONE.train()  # set to training mode
     for epoch in range(NUM_EPOCH):  # start training process
         if args.warmup_alpha:
-            if epoch < 20:
+            if epoch < 50:
                 args.alpha=0
             else:
                 args.alpha=args.big_alpha
+        if args.beta_decay:
+            if epoch < 50:
+                args.beta=args.beta
+            else:
+                args.beta = args.small_beta
         lr_scheduler.step(epoch)
 
         batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure = train_one_epoch(

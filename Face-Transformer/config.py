@@ -54,14 +54,17 @@ def get_config(args):
     if not os.path.exists(args.outdir):
         os.makedirs(args.outdir)
 
-    configuration['one_stage'] = args.one_stage
-    configuration['ewc'] = args.ewc
-    configuration['ewc_lambda'] = args.ewc_lambda
-    configuration['MAS'] = args.MAS
-    configuration['mas_lambda'] = args.mas_lambda
-    configuration['si'] = args.si
-    configuration['si_c'] = args.si_c
-    configuration['online'] = args.online
-    configuration['replay'] = args.replay
-    configuration['l2'] = args.l2
+    # if args has attribute 'evaluate', then only evaluate the model
+
+    if hasattr(args, 'one_stage') or hasattr(args, 'ewc') or hasattr(args, 'MAS') or hasattr(args, 'si') or hasattr(args, 'online') or hasattr(args, 'replay') or hasattr(args, 'l2'):
+        configuration['one_stage'] = args.one_stage
+        configuration['ewc'] = args.ewc
+        configuration['ewc_lambda'] = args.ewc_lambda
+        configuration['MAS'] = args.MAS
+        configuration['mas_lambda'] = args.mas_lambda
+        configuration['si'] = args.si
+        configuration['si_c'] = args.si_c
+        configuration['online'] = args.online
+        configuration['replay'] = args.replay
+        configuration['l2'] = args.l2
     return configuration
