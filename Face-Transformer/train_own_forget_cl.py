@@ -27,12 +27,24 @@ from IPython import embed
 
 from util.cal_norm import get_norm_of_lora
 from torch.utils.data import DataLoader
-
+import math
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
                        if p.requires_grad)
     return total_params
 
+def reinitialize_lora_parameters(model):
+    # 取消梯度计算
+    with torch.no_grad():
+        for name, param in model.named_parameters():
+            if 'lora' in name:
+                if isinstance(param, nn.Parameter):
+                    if 'lora_A' in name:
+                        nn.init.kaiming_uniform_(param, a=math.sqrt(50))
+                    elif 'lora_B' in name:
+                        nn.init.zeros_(param)
+                else:
+                    raise ValueError(f"Parameter {name} is not an instance of nn.Parameter.")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='for face verification')
@@ -392,6 +404,12 @@ if __name__ == '__main__':
         print('\n')
         print('\033[34m=========================task:{}==============================\033[0m'.format(task_i)) # blue
         print('\n')
+        # load pretrained model when task_i > 0
+        if task_i > 0 and args.one_stage:
+            print('load pretrained model in task {}'.format(task_i-1))
+            BACKBONE.load_state_dict(torch.load(os.path.join(WORK_PATH, 'Backbone_task_{}.pth'.format(task_i-1))))
+            # reinitialize LoRA model
+            reinitialize_lora_parameters(model_without_ddp)
         # split datasets
         # 1. calculate st1, en1, st2, en2
         st1 = 0
@@ -779,9 +797,22 @@ if __name__ == '__main__':
                 regularization_terms[task_i+1] = {'importance':importance, 'task_param':task_param}
         
         # test for old classes after training task_i
+        # save the model after one task training
+        if args.one_stage:
+            BACKBONE.eval()
+            torch.save(BACKBONE.state_dict(),
+                    os.path.join(WORK_PATH, 'Backbone_task_{}.pth'.
+                                format(task_i)))
+            BACKBONE.train()
         if task_i > 0:
             old_acc = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
             wandb.log({"old_acc_after_{}".format(task_i): old_acc})
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)
+    if args.ewc:
+        wandb.run.name = 'ewc'+str(args.ewc_lambda) + wandb.run.name
+    elif args.MAS:
+        wandb.run.name = 'mas'+str(args.mas_lambda) + wandb.run.name
+    elif args.l2:
+        wandb.run.name = 'l2'+str(args.l2_lambda) + wandb.run.name
  

@@ -39,7 +39,7 @@ def main(args):
         model = ViT_face(
             image_size=112,
             patch_size=8,
-            loss_type='CosFace',
+            loss_type=args.head,
             GPU_ID= GPU_ID,
             num_class=NUM_CLASS,
             dim=512,
@@ -52,7 +52,7 @@ def main(args):
         )
     elif args.network == 'VITs':
         model = ViTs_face(
-            loss_type='CosFace',
+            loss_type=args.head,
             GPU_ID=GPU_ID,
             num_class=NUM_CLASS,
             image_size=112,
@@ -92,7 +92,7 @@ def main(args):
  
     model.eval()
     # 遍历测试集
-    
+    model.to(DEVICE)
     correct = 0
     total = 0
 
@@ -100,6 +100,7 @@ def main(args):
     all_predicted = []
     all_labels = []
     all_outputs = []
+    all_embeds = []
    
     with torch.no_grad():
         for images, labels in testloader:
@@ -107,7 +108,7 @@ def main(args):
             images = images.to(DEVICE)
             labels = labels.to(DEVICE).long()
             # import pdb; pdb.set_trace()
-            outputs, _ = model(images, labels)  # 假设model是你的模型
+            outputs, embed = model(images, labels)  # 假设model是你的模型
             # import pdb; pdb.set_trace()
             _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
@@ -116,11 +117,13 @@ def main(args):
             all_predicted.extend(predicted.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             all_outputs.extend(outputs.cpu().numpy())
+            all_embeds.extend(embed.cpu().numpy())
             
         # 把all_predicted和all_labels转换成numpy array
         all_predicted = np.array(all_predicted)
         all_labels = np.array(all_labels)
         all_outputs = np.array(all_outputs)
+        all_embeds = np.array(all_embeds)
         # embed()
     # 打印测试精度
     accuracy = 100 * correct / total
@@ -130,8 +133,11 @@ def main(args):
     # wandb.log({"Test Accuracy": accuracy})
     # class_report = classification_report(all_labels, np.argmax(all_outputs, axis=1))
     # print(class_report)
-
-    plot_tsne(all_outputs, all_labels, "7class", fileNameDir="test-Tsne")
+    if args.mode=="before":
+        name="before"
+    elif args.mode=="after":
+        name="after"
+    plot_tsne(all_outputs, all_labels, name, fileNameDir="test-Tsne",mode=args.mode)
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
@@ -147,9 +153,16 @@ def parse_arguments(argv):
                         help="gpu ids or cpu",
                         default='cpu',
                         type=str)
+    parser.add_argument(
+        "-head",
+        "--head",
+        help="head type, ['Softmax', 'ArcFace', 'CosFace', 'SFaceLoss']",
+        default='ArcFace',
+        type=str)
+    parser.add_argument('--mode', type=str)
     return parser.parse_args(argv)
 
-def plot_tsne(features, labels, epoch,fileNameDir = None):
+def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
     '''
     features:(N*m) N*m大小特征，其中N代表有N个数据，每个数据m维
     label:(N) 有N个标签
@@ -183,7 +196,7 @@ def plot_tsne(features, labels, epoch,fileNameDir = None):
     data_label = []
     for v in df.y.tolist():
         if v == 0:
-            data_label.append("r4")
+            data_label.append("f1")
         elif v == 1:
             data_label.append("r1")
         elif v == 2:
@@ -191,14 +204,18 @@ def plot_tsne(features, labels, epoch,fileNameDir = None):
         elif v == 3:
             data_label.append("r3")
         elif v == 4:
-            data_label.append("r5")
-        elif v == 5:
-            data_label.append("f1")
-        elif v == 6:
             data_label.append("f2")
+        elif v == 5:
+            data_label.append("r4")
+        elif v == 6:
+            data_label.append("r5")
 
     df["value"] = data_label
     
+    if mode=="before":
+        title = "Before Forgetting"
+    elif mode=="after":
+        title = "After Forgetting"
     # hue=df.y.tolist()
     # hue:根据y列上的数据种类，来生成不同的颜色；
     # style:根据y列上的数据种类，来生成不同的形状点；
@@ -206,7 +223,7 @@ def plot_tsne(features, labels, epoch,fileNameDir = None):
     sns.scatterplot(x= df.comp1.tolist(), y= df.comp2.tolist(),hue=df.value.tolist(),style = df.value.tolist(),
                     palette=sns.color_palette(hex,class_num),markers= {"r1":".","r2":".","r3":".","r4":".","r5":".","f1":",","f2":","},
                     # s = 10,
-                    data=df).set(title="Before Forgetting") #T-SNE projection
+                    data=df).set(title=title) #T-SNE projection
   
  
    
