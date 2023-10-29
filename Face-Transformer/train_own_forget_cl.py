@@ -283,6 +283,8 @@ if __name__ == '__main__':
         NUM_CLASS = 100
     elif args.data_mode == 'casia1000':
         NUM_CLASS = 1000
+    elif args.data_mode == 'tsne':
+        NUM_CLASS = 10
     h, w = 112, 112
 
     assert h == INPUT_SIZE[0] and w == INPUT_SIZE[1]

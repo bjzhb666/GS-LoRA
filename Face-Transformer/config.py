@@ -37,6 +37,8 @@ def get_config(args):
         configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub100_train_test/'
     elif args.data_mode == 'casia1000':
         configuration['DATA_ROOT'] = './data/faces_webface_112x112_sub1000/'
+    elif args.data_mode == 'tsne':
+        configuration['DATA_ROOT'] = './data/faces_Tsne_sub/'
     else:
         raise Exception(args.data_mode)
     configuration['EVAL_PATH'] = './eval/'

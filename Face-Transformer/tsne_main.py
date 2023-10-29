@@ -34,7 +34,7 @@ def main(args):
     # DATA_ROOT = '/raid/Data/ms1m-retinaface-t1/'
     # with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
     #     NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
-    NUM_CLASS = 100 # CASIA-WebFace-sub100
+    NUM_CLASS = 10 # CASIA-WebFace-sub100
     if args.network == 'VIT' :
         model = ViT_face(
             image_size=112,
@@ -79,7 +79,7 @@ def main(args):
         transforms.ToTensor(),
     ])
     # data_root='./data/faces_webface_112x112_sub100_train_test/test'
-    data_root='./data/faces_Tsne_sub'
+    data_root='./data/faces_Tsne_sub/test'
     test_dataset = datasets.ImageFolder(root=data_root,transform=data_transform)    
     testloader = torch.utils.data.DataLoader(test_dataset,
                                              batch_size=args.batch_size,
@@ -130,14 +130,14 @@ def main(args):
     print('\n')
     print('Test Accuracy: {:.2f}%'.format(accuracy))
     print('\n')
-    # wandb.log({"Test Accuracy": accuracy})
-    # class_report = classification_report(all_labels, np.argmax(all_outputs, axis=1))
-    # print(class_report)
+
+    class_report = classification_report(all_labels, np.argmax(all_outputs, axis=1))
+    print(class_report)
     if args.mode=="before":
         name="before"
     elif args.mode=="after":
         name="after"
-    plot_tsne(all_outputs, all_labels, name, fileNameDir="test-Tsne",mode=args.mode)
+    plot_tsne(all_embeds, all_labels, name, fileNameDir="test-Tsne",mode=args.mode)
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
@@ -192,7 +192,7 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
  
  
     # 颜色是根据标签的大小顺序进行赋色.
-    hex = ["#e45a82", "#82e45a", "#5a82e4", "#fdb157", "#57fdb1", "#b157fd", "#fd5a57"] # 绿、红
+    hex = ["#c957db", "#dd5f57", "#b9db57", "#57db30", "#5784db", "#f2a542", "#42f2b5", "#db57a6", "#57db83", "#c3db57"] # 绿、红
     data_label = []
     for v in df.y.tolist():
         if v == 0:
@@ -209,6 +209,12 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
             data_label.append("r4")
         elif v == 6:
             data_label.append("r5")
+        elif v == 7:
+            data_label.append("r6")
+        elif v == 8:
+            data_label.append("r7")
+        elif v == 9:
+            data_label.append("r8")
 
     df["value"] = data_label
     
@@ -221,14 +227,15 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
     # style:根据y列上的数据种类，来生成不同的形状点；
     # s:指定显示形状的大小
     sns.scatterplot(x= df.comp1.tolist(), y= df.comp2.tolist(),hue=df.value.tolist(),style = df.value.tolist(),
-                    palette=sns.color_palette(hex,class_num),markers= {"r1":".","r2":".","r3":".","r4":".","r5":".","f1":",","f2":","},
+                    palette=sns.color_palette(hex,class_num),
+                    markers= {"r1":".","r2":".","r3":".","r4":".","r5":".","r6":".","r7":".","r8":".","f1":",","f2":","},
                     # s = 10,
                     data=df).set(title=title) #T-SNE projection
   
  
    
     # 指定图注的位置 "lower right"
-    plt_sne.legend(loc = "lower right")
+    plt_sne.legend(loc=(0.97,0.05))
     # 不要坐标轴
     plt_sne.axis("off")
     # 保存图像
