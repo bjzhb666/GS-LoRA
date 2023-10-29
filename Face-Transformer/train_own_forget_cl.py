@@ -409,7 +409,7 @@ if __name__ == '__main__':
         # load pretrained model when task_i > 0
         if task_i > 0 and args.one_stage:
             print('load pretrained model in task {}'.format(task_i-1))
-            BACKBONE.load_state_dict(torch.load(os.path.join(WORK_PATH, 'Backbone_task_{}.pth'.format(task_i-1))))
+            BACKBONE.load_state_dict(torch.load(os.path.join(WORK_PATH, 'task-level', 'Backbone_task_{}.pth'.format(task_i-1))))
             # reinitialize LoRA model
             reinitialize_lora_parameters(model_without_ddp)
         # split datasets
@@ -802,8 +802,9 @@ if __name__ == '__main__':
         # save the model after one task training
         if args.one_stage:
             BACKBONE.eval()
+            os.makedirs(os.path.join(WORK_PATH,'task-level'), exist_ok=True)
             torch.save(BACKBONE.state_dict(),
-                    os.path.join(WORK_PATH, 'Backbone_task_{}.pth'.
+                    os.path.join(WORK_PATH,'task-level','Backbone_task_{}.pth'.
                                 format(task_i)))
             BACKBONE.train()
         if task_i > 0:
