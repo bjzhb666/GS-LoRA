@@ -525,7 +525,7 @@ if __name__ == '__main__':
             alpha=args.alpha)
         # print(batch)
     # calculate norm list
-    norm_list = get_norm_of_lora(model_without_ddp, type='L2')
+    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth)
     wandb.log({"norm_list": norm_list})
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \

@@ -262,6 +262,8 @@ def main(args):
     elif args.mode=="after":
         name="after"
     plot_tsne(all_embeds, all_labels, name, fileNameDir="test-Tsne",mode=args.mode)
+    plot_tsne(all_outputs, all_labels, name+'outputs', fileNameDir="test-Tsne",mode=args.mode)
+
 
 def parse_arguments(argv):
     parser = argparse.ArgumentParser()
@@ -367,6 +369,8 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
     # 保存图像
     plt_sne.savefig(os.path.join(fileNameDir,"%s.jpg") % str(epoch),format = "jpg",dpi = 300)
     # plt_sne.show()
+    # 清除画布
+    plt_sne.clf()
 
 
 

@@ -66,7 +66,7 @@ def train_one_epoch(model:torch.nn.Module,
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
 
         # compute structure loss
-        structure_loss = get_structure_loss(model)
+        structure_loss = get_structure_loss(model, num_layers=cfg['NUM_LAYERS'])
         losses_structure.update(alpha*structure_loss.data.item(), inputs_remain.size(0))
         # compute regularization loss
 
@@ -134,8 +134,7 @@ def train_one_epoch(model:torch.nn.Module,
 
     return batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure
 
-def train_one_epoch_regularzation(model:torch.nn.Module,):
-    pass
+
 def evaluate(model:torch.nn.Module,
              testloader_forget:torch.utils.data.DataLoader,
              testloader_remain:torch.utils.data.DataLoader,
@@ -217,7 +216,7 @@ def eval_data(model:torch.nn.Module,
     return accuracy
 
 
-def get_structure_loss(model:torch.nn.Module):
+def get_structure_loss(model:torch.nn.Module, num_layers:int):
     if isinstance(model, torch.nn.DataParallel):
         model_without_ddp = model.module
     else:
@@ -251,7 +250,7 @@ def get_structure_loss(model:torch.nn.Module):
     transformer.layers.5.1.fn.fn.net.3.lora_A
     transformer.layers.5.1.fn.fn.net.3.lora_B
     '''
-    for i in range(6):
+    for i in range(num_layers):
         group_item = []
         group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
         group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))

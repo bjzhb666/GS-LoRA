@@ -189,6 +189,17 @@ if __name__ == '__main__':
                         default=10,
                         metavar='N',
                         help='vit depth (default: 20)')
+    # forget and remain cls
+    parser.add_argument('--num_of_first_cls',
+                        type=int,
+                        default=50,
+                        metavar='N',
+                        help='number of first cls (default: 50)')
+    parser.add_argument('--per_forget_cls',
+                        type=int,
+                        default=50,
+                        metavar='N',
+                        help='number of forget cls (default: 50)')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -248,6 +259,7 @@ if __name__ == '__main__':
     data_transform = transforms.Compose([
         transforms.ToTensor(),
     ])
+    order_list = [83, 17, 10, 9, 89, 52, 7, 32, 37, 77, 61, 34, 78, 55, 56, 63, 69, 22, 75, 66, 35, 72, 71, 23, 86, 38, 24, 5, 29, 30, 16, 11, 82, 19, 57, 14, 91, 27, 98, 53, 0, 20, 59, 28, 47, 18, 6, 48, 12, 62, 1, 43, 3, 60, 41, 85, 4, 95, 97, 36, 94, 65, 67, 99, 25, 33, 70, 40, 92, 31, 58, 15, 45, 2, 87, 76, 80, 44, 64, 8, 51, 54, 13, 88, 84, 26, 50, 39, 96, 81, 49, 42, 21, 93, 74, 73, 46, 90, 68, 79]
     # get forget and remain dataset
     # split datasets
     # 1. calculate st1, en1, st2, en2
@@ -284,6 +296,9 @@ if __name__ == '__main__':
     forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
     remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
 
+    combined_dataset_train = torch.utils.data.ConcatDataset([forget_dataset_train_sub, remain_dataset_train_sub])
+    
+    # get dataloader
     train_loader_forget = torch.utils.data.DataLoader(forget_dataset_train_sub,
                                               batch_size=BATCH_SIZE,
                                               shuffle=True,
@@ -304,10 +319,17 @@ if __name__ == '__main__':
                                                 shuffle=False,
                                                 num_workers=WORKERS,
                                                 drop_last=False)
+    combined_loader_train = torch.utils.data.DataLoader(combined_dataset_train,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=True,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+
     print('len(train_loader_forget)', len(train_loader_forget))
     print('len(train_loader_remain)', len(train_loader_remain))
     print('len(testloader_forget)', len(testloader_forget))
     print('len(testloader_remain)', len(testloader_remain))
+    print('len(combined_loader_train)', len(combined_loader_train))
     # import pdb; pdb.set_trace()
     # testloader = torch.utils.data.DataLoader(test_dataset,
     #                                          batch_size=BATCH_SIZE,
@@ -317,24 +339,24 @@ if __name__ == '__main__':
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
 
-    # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
-    dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
+    # # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
+    # dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
     
-    train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)  
-    test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
+    # train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)  
+    # test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
 
-    trainloader = torch.utils.data.DataLoader(train_dataset,
-                                              batch_size=BATCH_SIZE,
-                                              shuffle=True,
-                                              num_workers=WORKERS,
-                                              drop_last=True)
-    testloader = torch.utils.data.DataLoader(test_dataset,
-                                             batch_size=BATCH_SIZE,
-                                             shuffle=False,
-                                             num_workers=WORKERS,
-                                             drop_last=False)
+    # trainloader = torch.utils.data.DataLoader(train_dataset,
+    #                                           batch_size=BATCH_SIZE,
+    #                                           shuffle=True,
+    #                                           num_workers=WORKERS,
+    #                                           drop_last=True)
+    # testloader = torch.utils.data.DataLoader(test_dataset,
+    #                                          batch_size=BATCH_SIZE,
+    #                                          shuffle=False,
+    #                                          num_workers=WORKERS,
+    #                                          drop_last=False)
 
-    print("Number of Training Classes: {}".format(NUM_CLASS))
+    # print("Number of Training Classes: {}".format(NUM_CLASS))
 
     highest_acc = 0.0
 
@@ -427,8 +449,8 @@ if __name__ == '__main__':
         BACKBONE = BACKBONE.to(DEVICE)
 
     #======= train & validation & save checkpoint =======#
-    DISP_FREQ = 10  # frequency to display training loss & acc
-    VER_FREQ = 20  # frequency to perform validation
+    DISP_FREQ = 5  # frequency to display training loss & acc
+    VER_FREQ = 5  # frequency to perform validation
 
     batch = 0  # batch index
 
@@ -436,6 +458,8 @@ if __name__ == '__main__':
     top1 = AverageMeter()
 
     BACKBONE.train()  # set to training mode
+    forget_acc = []
+    remain_acc = []
 
     for epoch in range(NUM_EPOCH):  # start training process
 
@@ -443,7 +467,7 @@ if __name__ == '__main__':
 
         last_time = time.time()
 
-        for inputs, labels in iter(trainloader):
+        for inputs, labels in iter(combined_loader_train):
 
             # compute output
             inputs = inputs.to(DEVICE)
@@ -502,13 +526,13 @@ if __name__ == '__main__':
                     break
                 print("Learning rate %f" % lr)
                 print("Perform Evaluation on test set and Save Checkpoints...")
-                acc = []
+                
                 BACKBONE.eval()  # set to evaluation mode
                 # 遍历测试集
                 correct = 0
                 total = 0
                 with torch.no_grad():
-                    for images, labels in testloader:
+                    for images, labels in testloader_forget:
                         # 在这里进行测试操作
                         images = images.to(DEVICE)
                         labels = labels.to(DEVICE).long()
@@ -520,40 +544,38 @@ if __name__ == '__main__':
                         correct += (predicted == labels).sum().item()
                 # 打印测试精度
                 accuracy = 100 * correct / total
-                print('Test Accuracy: {:.2f}%'.format(accuracy))
-                wandb.log({"Test Accuracy": accuracy}, step=batch + 1)
-                acc.append(accuracy)
-                # save checkpoints per epoch
+                print('Test forget Accuracy: {:.2f}%'.format(accuracy))
+                wandb.log({"Test forget Accuracy": accuracy}, step=batch + 1)
+                forget_acc.append(accuracy)
 
-                if accuracy > highest_acc:
-                    highest_acc = accuracy
-                    if MULTI_GPU:
-                        torch.save(
-                            BACKBONE.module.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth"
-                                .format(BACKBONE_NAME, epoch + 1, batch + 1,
-                                        get_time())))
-                    else:
-                        torch.save(
-                            BACKBONE.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth"
-                                .format(BACKBONE_NAME, epoch + 1, batch + 1,
-                                        get_time())))
-                    # set the maximum checkpoint numbers to keep
-                    if len(os.listdir(WORK_PATH)) >= 6:
-                        checkpoints = list(
-                            filter(lambda f: f.endswith('.pth'),
-                                   os.listdir(WORK_PATH)))
-                        checkpoints.sort(key=lambda f: os.path.getmtime(
-                            os.path.join(WORK_PATH, f)))
-                        os.remove(os.path.join(WORK_PATH, checkpoints[0]))
+                BACKBONE.eval()
+                correct = 0
+                total = 0
+                with torch.no_grad():
+                    for images, labels in testloader_remain:
+                        # 在这里进行测试操作
+                        images = images.to(DEVICE)
+                        labels = labels.to(DEVICE).long()
+
+                        outputs, _ = BACKBONE(images, labels)
+                        _, predicted = torch.max(outputs.data, 1)
+                        total += labels.size(0)
+                        correct += (predicted == labels).sum().item()
+                # 打印测试精度
+                accuracy = 100 * correct / total
+                print('Test remain Accuracy: {:.2f}%'.format(accuracy))
+                wandb.log({"Test remain Accuracy": accuracy}, step=batch + 1)
+                remain_acc.append(accuracy)
+
                 BACKBONE.train()  # set to training mode
 
             batch += 1  # batch index
-
+    
+    # save forget and remain acc
+    forget_acc = np.array(forget_acc)
+    remain_acc = np.array(remain_acc)
+    np.save(os.path.join(WORK_PATH, 'forget_acc.npy'), forget_acc)
+    np.save(os.path.join(WORK_PATH, 'remain_acc.npy'), remain_acc)
+    
     wandb.run.name = args.net + args.data_mode + args.head + str(args.lr) + 'bs' \
         +str(args.batch_size) + 'ep' + str(args.epochs)

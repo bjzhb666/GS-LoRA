@@ -1,7 +1,7 @@
 import torch
 
 
-def get_norm_of_lora(model, type='L2'):
+def get_norm_of_lora(model, type='L2', group_num=6):
     """
     get L2 norm of each group of lora parameters
     :param model: model (is already without ddp)
@@ -11,7 +11,7 @@ def get_norm_of_lora(model, type='L2'):
     with torch.no_grad():
         norm_list = []
         group_layers = []
-        for i in range(6):
+        for i in range(group_num):
             group_item = []
             group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
             group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))

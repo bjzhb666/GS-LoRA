@@ -57,7 +57,8 @@ def get_config(args):
         os.makedirs(args.outdir)
 
     # if args has attribute 'evaluate', then only evaluate the model
-
+    configuration['NUM_LAYERS'] = args.vit_depth
+    
     if hasattr(args, 'one_stage') or hasattr(args, 'ewc') or hasattr(args, 'MAS') or hasattr(args, 'si') or hasattr(args, 'online') or hasattr(args, 'replay') or hasattr(args, 'l2'):
         configuration['one_stage'] = args.one_stage
         configuration['ewc'] = args.ewc
