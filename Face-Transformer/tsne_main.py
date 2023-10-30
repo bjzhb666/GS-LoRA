@@ -25,6 +25,26 @@ from sklearn.manifold import TSNE
 import os
 from IPython import embed
 
+def transfer_label(labels, original_class_to_idx, new_class_to_idx):
+    # labels: tensor, shape: (batch_size, )
+    # original_class_to_idx: dict, eg: {'138': 0, '6332': 1, '6558': 2, '658': 3, '6811': 4, '819': 5, '944': 6}
+    # new_class_to_idx: dict, eg: {'138': 0, '6332': 1, '6558': 2, '658': 3, '6811': 4, '819': 5, '944': 6}
+    # return: tensor, shape: (batch_size, )
+    list_labels = labels.numpy().astype(int).tolist()
+    new_labels = []
+
+    for value in list_labels:
+        # 遍历第一个字典，找到对应的key
+        for key, val in new_class_to_idx.items():
+            if val == value:
+                # 根据key获取第二个字典的值
+                new_label = original_class_to_idx[int(key)]
+                new_labels.append(new_label)
+                break
+    
+    new_labels = torch.tensor(new_labels)
+    return new_labels
+
 def main(args):
     print(args)
     MULTI_GPU = False
@@ -34,7 +54,7 @@ def main(args):
     # DATA_ROOT = '/raid/Data/ms1m-retinaface-t1/'
     # with open(os.path.join(DATA_ROOT, 'property'), 'r') as f:
     #     NUM_CLASS, h, w = [int(i) for i in f.read().split(',')]
-    NUM_CLASS = 10 # CASIA-WebFace-sub100
+    NUM_CLASS = 100 # CASIA-WebFace-sub100
     if args.network == 'VIT' :
         model = ViT_face(
             image_size=112,
@@ -69,7 +89,7 @@ def main(args):
         )
 
     model_root = args.model
-    model.load_state_dict(torch.load(model_root))
+    model.load_state_dict(torch.load(model_root),strict=False)
 
     w = torch.load(model_root)
     for x in w.keys():
@@ -88,8 +108,111 @@ def main(args):
                                              drop_last=False)
 
     print(test_dataset.class_to_idx)
+    new_class_to_idx = test_dataset.class_to_idx
     # {'138': 0, '6332': 1, '6558': 2, '658': 3, '6811': 4, '819': 5, '944': 6}
- 
+    original_class_to_idx = {1005: 0,
+        1014: 1,
+        1022: 2,
+        1039: 3,
+        1147: 4,
+        1154: 5,
+        1226: 6,
+        1236: 7,
+        1245: 8,
+        1248: 9,
+        1299: 10,
+        1317: 11,
+        1321: 12,
+        138: 13,
+        14: 14,
+        1466: 15,
+        1542: 16,
+        1595: 17,
+        1649: 18,
+        1657: 19,
+        176: 20,
+        1764: 21,
+        18: 22,
+        1822: 23,
+        194: 24,
+        199: 25,
+        1994: 26,
+        2013: 27,
+        2027: 28,
+        2059: 29,
+        21: 30,
+        2188: 31,
+        2189: 32,
+        23: 33,
+        2390: 34,
+        2439: 35,
+        2526: 36,
+        256: 37,
+        2639: 38,
+        2644: 39,
+        2725: 40,
+        2738: 41,
+        2749: 42,
+        2834: 43,
+        291: 44,
+        2986: 45,
+        3: 46,
+        3024: 47,
+        308: 48,
+        3274: 49,
+        3384: 50,
+        3410: 51,
+        343: 52,
+        3687: 53,
+        37: 54,
+        3989: 55,
+        406: 56,
+        41: 57,
+        4111: 58,
+        4238: 59,
+        4290: 60,
+        4312: 61,
+        4362: 62,
+        4401: 63,
+        4478: 64,
+        4670: 65,
+        47: 66,
+        476: 67,
+        4968: 68,
+        5065: 69,
+        513: 70,
+        5287: 71,
+        5444: 72,
+        5447: 73,
+        5547: 74,
+        578: 75,
+        5830: 76,
+        5889: 77,
+        6023: 78,
+        6049: 79,
+        6090: 80,
+        6224: 81,
+        626: 82,
+        6332: 83,
+        6374: 84,
+        6558: 85,
+        658: 86,
+        6723: 87,
+        6811: 88,
+        69: 89,
+        693: 90,
+        7601: 91,
+        7766: 92,
+        8071: 93,
+        819: 94,
+        8313: 95,
+        8401: 96,
+        872: 97,
+        944: 98,
+        956: 99
+    }
+    
+
     model.eval()
     # 遍历测试集
     model.to(DEVICE)
@@ -106,8 +229,9 @@ def main(args):
         for images, labels in testloader:
             # 在这里进行测试操作
             images = images.to(DEVICE)
-            labels = labels.to(DEVICE).long()
-            # import pdb; pdb.set_trace()
+            maped_labels = transfer_label(labels, original_class_to_idx, new_class_to_idx)    
+            labels = maped_labels.to(DEVICE).long()
+            
             outputs, embed = model(images, labels)  # 假设model是你的模型
             # import pdb; pdb.set_trace()
             _, predicted = torch.max(outputs.data, 1)
@@ -194,26 +318,28 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
     # 颜色是根据标签的大小顺序进行赋色.
     hex = ["#c957db", "#dd5f57", "#b9db57", "#57db30", "#5784db", "#f2a542", "#42f2b5", "#db57a6", "#57db83", "#c3db57"] # 绿、红
     data_label = []
+    # 94 98 85 86 83 57 20 19作为保留类819 944 6558 658 6332 41 176 1657
+    # 13 88做遗忘类别 138 6811
     for v in df.y.tolist():
-        if v == 0:
+        if v == 13:
             data_label.append("f1")
-        elif v == 1:
+        elif v == 94:
             data_label.append("r1")
-        elif v == 2:
+        elif v == 98:
             data_label.append("r2")
-        elif v == 3:
+        elif v == 85:
             data_label.append("r3")
-        elif v == 4:
+        elif v == 88:
             data_label.append("f2")
-        elif v == 5:
+        elif v == 83:
             data_label.append("r4")
-        elif v == 6:
+        elif v == 86:
             data_label.append("r5")
-        elif v == 7:
+        elif v == 57:
             data_label.append("r6")
-        elif v == 8:
+        elif v == 20:
             data_label.append("r7")
-        elif v == 9:
+        elif v == 19:
             data_label.append("r8")
 
     df["value"] = data_label

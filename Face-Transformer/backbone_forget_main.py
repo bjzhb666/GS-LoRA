@@ -20,7 +20,7 @@ from vit_pytorch_face import ViTs_face
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
-
+from torch.utils.data import Subset
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -248,6 +248,75 @@ if __name__ == '__main__':
     data_transform = transforms.Compose([
         transforms.ToTensor(),
     ])
+    # get forget and remain dataset
+    # split datasets
+    # 1. calculate st1, en1, st2, en2
+    st1 = 0
+    en1 = args.num_of_first_cls
+    st2 = en1
+    en2 = en1+args.per_forget_cls
+    # 2. split datasets
+    train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)
+    test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
+    remain_dataset_train, forget_dataset_train = split_dataset(dataset=train_dataset,
+                                                               class_order_list=order_list,
+                                                               split1_start=st1,
+                                                               split1_end=en1,
+                                                               split2_start=st2,
+                                                               split2_end=en2)
+    remain_dataset_test, forget_dataset_test = split_dataset(dataset=test_dataset,
+                                                                class_order_list=order_list,
+                                                                split1_start=st1,
+                                                                split1_end=en1,
+                                                                split2_start=st2,
+                                                                split2_end=en2)
+
+
+    # get sub datasets
+    len_forget_dataset_train = len(forget_dataset_train)
+    len_remain_dataset_train = len(remain_dataset_train)
+    subset_size_forget = int(len_forget_dataset_train*0.1)
+    subset_size_remain = int(len_remain_dataset_train*0.1)
+
+    subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
+    subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
+
+    forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
+    remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
+
+    train_loader_forget = torch.utils.data.DataLoader(forget_dataset_train_sub,
+                                              batch_size=BATCH_SIZE,
+                                              shuffle=True,
+                                              num_workers=WORKERS,
+                                              drop_last=False)
+    train_loader_remain = torch.utils.data.DataLoader(remain_dataset_train_sub,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=True,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    testloader_forget = torch.utils.data.DataLoader(forget_dataset_test,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=False,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    testloader_remain = torch.utils.data.DataLoader(remain_dataset_test,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=False,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
+    print('len(train_loader_forget)', len(train_loader_forget))
+    print('len(train_loader_remain)', len(train_loader_remain))
+    print('len(testloader_forget)', len(testloader_forget))
+    print('len(testloader_remain)', len(testloader_remain))
+    # import pdb; pdb.set_trace()
+    # testloader = torch.utils.data.DataLoader(test_dataset,
+    #                                          batch_size=BATCH_SIZE,
+    #                                          shuffle=False,
+    #                                          num_workers=WORKERS,
+    #                                          drop_last=False)
+
+    print("Number of Training Classes: {}".format(NUM_CLASS))
+
     # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
     dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
     
