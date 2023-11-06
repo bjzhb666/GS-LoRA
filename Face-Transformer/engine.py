@@ -66,7 +66,10 @@ def train_one_epoch(model:torch.nn.Module,
         top1_forget.update(prec1_forget.data.item(), inputs_forget.size(0))
 
         # compute structure loss
-        structure_loss = get_structure_loss(model, num_layers=cfg['NUM_LAYERS'])
+        if epoch < cfg['ALPHA_EPOCH']:
+            structure_loss = torch.tensor(0.0).to(device)
+        else:
+            structure_loss = get_structure_loss(model, num_layers=cfg['NUM_LAYERS'], group_type=cfg['GROUP_TYPE'])
         losses_structure.update(alpha*structure_loss.data.item(), inputs_remain.size(0))
         # compute regularization loss
 
@@ -216,7 +219,17 @@ def eval_data(model:torch.nn.Module,
     return accuracy
 
 
-def get_structure_loss(model:torch.nn.Module, num_layers:int):
+def get_structure_loss(model:torch.nn.Module, num_layers:int, group_type:str='block'):
+    '''
+    Get the structure loss of the model
+    :param model: model (is already without ddp)
+    :param num_layers: number of layers of the model
+    :param group_type: 
+        -block (each Transformer block is a group)
+        -lora (each LoRA is a group), 2 LoRAs in one block
+        -matrix (each layer is a group), 2 matrix in one LoRA
+
+    '''
     if isinstance(model, torch.nn.DataParallel):
         model_without_ddp = model.module
     else:
@@ -250,14 +263,47 @@ def get_structure_loss(model:torch.nn.Module, num_layers:int):
     transformer.layers.5.1.fn.fn.net.3.lora_A
     transformer.layers.5.1.fn.fn.net.3.lora_B
     '''
-    for i in range(num_layers):
-        group_item = []
-        group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
-        group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
-        group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
-        group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
-        group_layers.append(group_item)
+    if group_type == 'block':
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+            group_layers.append(group_item)
+    elif group_type == 'lora':
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+            group_layers.append(group_item)
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+            group_layers.append(group_item)
+    elif group_type == 'matrix':
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+            group_layers.append(group_item)
+        
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+            group_layers.append(group_item)
+        
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+            group_layers.append(group_item)
 
+        for i in range(num_layers):
+            group_item = []
+            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+            group_layers.append(group_item)
+    else:
+        raise ValueError('group_type should be block or lora or matrix')
     # get the parameters
     group_params = []
     for group_item in group_layers:

@@ -70,4 +70,10 @@ def get_config(args):
         configuration['online'] = args.online
         configuration['replay'] = args.replay
         configuration['l2'] = args.l2
+    
+    if hasattr(args, 'grouping'):
+        configuration['GROUP_TYPE'] = args.grouping
+    
+    if hasattr(args, 'alpha_epoch'):
+        configuration['ALPHA_EPOCH'] = args.alpha_epoch
     return configuration

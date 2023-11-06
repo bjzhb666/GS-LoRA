@@ -260,7 +260,7 @@ if __name__ == '__main__':
                                               batch_size=BATCH_SIZE,
                                               shuffle=True,
                                               num_workers=WORKERS,
-                                              drop_last=True)
+                                              drop_last=False)
     testloader = torch.utils.data.DataLoader(test_dataset,
                                              batch_size=BATCH_SIZE,
                                              shuffle=False,

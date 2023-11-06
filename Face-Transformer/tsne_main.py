@@ -248,6 +248,10 @@ def main(args):
         all_labels = np.array(all_labels)
         all_outputs = np.array(all_outputs)
         all_embeds = np.array(all_embeds)
+        # 保存all_predicted和all_labels
+        np.save('all_outputs.npy', all_outputs)
+        np.save('all_predicted.npy', all_predicted)
+        np.save('all_labels.npy', all_labels)
         # embed()
     # 打印测试精度
     accuracy = 100 * correct / total
@@ -318,7 +322,7 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
  
  
     # 颜色是根据标签的大小顺序进行赋色.
-    hex = ["#c957db", "#dd5f57", "#b9db57", "#57db30", "#5784db", "#f2a542", "#42f2b5", "#db57a6", "#57db83", "#c3db57"] # 绿、红
+    hex = ["#c957db", "#dd5f57", "#b9db57", "#57db30", "#5784db", "#f2a542", "#ed0017", "#db57a6", "#57db83", "#c3db57"] # 绿、红
     data_label = []
     # 94 98 85 86 83 57 20 19作为保留类819 944 6558 658 6332 41 176 1657
     # 13 88做遗忘类别 138 6811
@@ -356,7 +360,7 @@ def plot_tsne(features, labels, epoch,fileNameDir = None, mode=None):
     # s:指定显示形状的大小
     sns.scatterplot(x= df.comp1.tolist(), y= df.comp2.tolist(),hue=df.value.tolist(),style = df.value.tolist(),
                     palette=sns.color_palette(hex,class_num),
-                    markers= {"r1":".","r2":".","r3":".","r4":".","r5":".","r6":".","r7":".","r8":".","f1":",","f2":","},
+                    markers= {"r1":".","r2":".","r3":".","r4":".","r5":".","r6":".","r7":".","r8":".","f1":"*","f2":"*"},
                     # s = 10,
                     data=df).set(title=title) #T-SNE projection
   

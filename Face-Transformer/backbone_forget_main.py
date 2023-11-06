@@ -21,6 +21,7 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
 from torch.utils.data import Subset
+import numpy as np
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -200,6 +201,7 @@ if __name__ == '__main__':
                         default=50,
                         metavar='N',
                         help='number of forget cls (default: 50)')
+    parser.add_argument('--wandb_group', type=str, default='casia100')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -240,7 +242,7 @@ if __name__ == '__main__':
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
     wandb.init(project="face recognition",
-               group='casia100',
+               group=args.wandb_group,
                mode="offline" if args.wandb_offline else "online")
     wandb.config.update(args) 
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
@@ -415,7 +417,7 @@ if __name__ == '__main__':
         if os.path.isfile(BACKBONE_RESUME_ROOT):
             print("Loading Backbone Checkpoint '{}'".format(
                 BACKBONE_RESUME_ROOT))
-            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT))
+            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT),strict=False)
         else:
             print(
                 "No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch"

@@ -232,6 +232,9 @@ if __name__ == '__main__':
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
+    # FFN freeze args
+    parser.add_argument('--ffn_open', default=False, action='store_true', help='whether to freeze ffn')
+    parser.add_argument('--only_ffn', default=False, action='store_true', help='whether to train only ffn')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -375,8 +378,17 @@ if __name__ == '__main__':
                 )  # 19,157,504 
     else: # CL baselines
         for n,p in BACKBONE.named_parameters():
-            if 'loss.weight' in n: # 打开梯度
+            if 'loss' in n and not args.ffn_open: # 打开梯度
                 p.requires_grad = False
+        
+        if args.only_ffn:
+            for n,p in BACKBONE.named_parameters():
+                if 'fn.fn.net' in n:
+                    p.requires_grad = True
+                elif 'loss' in n:
+                    p.requires_grad = True
+                else:
+                    p.requires_grad = False
     
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
@@ -610,7 +622,7 @@ if __name__ == '__main__':
                 # print(batch)
                 # calculate norm list
             
-            norm_list = get_norm_of_lora(model_without_ddp, type='L2')
+            norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth)
             wandb.log({"norm_list-{}".format(task_i): norm_list})
         else: # CL baselines
             BACKBONE.train()
@@ -801,6 +813,13 @@ if __name__ == '__main__':
         # test for old classes after training task_i
         # save the model after one task training
         if args.one_stage:
+            BACKBONE.eval()
+            os.makedirs(os.path.join(WORK_PATH,'task-level'), exist_ok=True)
+            torch.save(BACKBONE.state_dict(),
+                    os.path.join(WORK_PATH,'task-level','Backbone_task_{}.pth'.
+                                format(task_i)))
+            BACKBONE.train()
+        else:
             BACKBONE.eval()
             os.makedirs(os.path.join(WORK_PATH,'task-level'), exist_ok=True)
             torch.save(BACKBONE.state_dict(),

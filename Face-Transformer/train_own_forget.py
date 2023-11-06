@@ -216,10 +216,15 @@ if __name__ == '__main__':
     # wramup for alpha
     parser.add_argument('--warmup_alpha', default=False, action='store_true', help='whether to use warmup_alpha')
     parser.add_argument('--big_alpha', default=0.0005, type=float, help='big alpha for warmup_alpha')
+    parser.add_argument('--alpha_epoch', default=20, type=int, help='epoch for alpha')
     # beta decay
     parser.add_argument('--beta_decay', default=False, action='store_true', help='whether to use beta_decay')
     parser.add_argument('--small_beta', default=1e-4, type=float, help='small beta for beta_decay')
     parser.add_argument('--wandb_group', default=None, type=str, help='wandb group name')
+    # grouping strategy
+    parser.add_argument('--grouping', default='block', type=str, help='grouping strategy')
+    # data ratio
+    parser.add_argument('--data_ratio', default=0.1, type=float, help='data ratio')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -315,8 +320,8 @@ if __name__ == '__main__':
     # get sub datasets
     len_forget_dataset_train = len(forget_dataset_train)
     len_remain_dataset_train = len(remain_dataset_train)
-    subset_size_forget = int(len_forget_dataset_train*0.1)
-    subset_size_remain = int(len_remain_dataset_train*0.1)
+    subset_size_forget = int(len_forget_dataset_train*args.data_ratio)
+    subset_size_remain = int(len_remain_dataset_train*args.data_ratio)
 
     subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
     subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
@@ -489,7 +494,7 @@ if __name__ == '__main__':
     BACKBONE.train()  # set to training mode
     for epoch in range(NUM_EPOCH):  # start training process
         if args.warmup_alpha:
-            if epoch < 50:
+            if epoch < args.alpha_epoch:
                 args.alpha=0
             else:
                 args.alpha=args.big_alpha
@@ -525,7 +530,7 @@ if __name__ == '__main__':
             alpha=args.alpha)
         # print(batch)
     # calculate norm list
-    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth)
+    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth, group_type=args.grouping)
     wandb.log({"norm_list": norm_list})
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
