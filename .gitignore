@@ -9,3 +9,4 @@ Face-Transformer/test-Tsne/
 *.pdf
 *.png
 *.npy
+*.pth

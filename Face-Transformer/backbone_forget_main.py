@@ -22,6 +22,7 @@ from timm.optim import create_optimizer
 import loralib as lora
 from torch.utils.data import Subset
 import numpy as np
+from engine import eval_data
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -167,7 +168,7 @@ if __name__ == '__main__':
                         help='LR decay rate (default: 0.1)')
     parser.add_argument('--num_workers',
                         type=int,
-                        default=4,
+                        default=8,
                         metavar='N',
                         help='dataloader threads (default: 4)')
 
@@ -202,6 +203,9 @@ if __name__ == '__main__':
                         metavar='N',
                         help='number of forget cls (default: 50)')
     parser.add_argument('--wandb_group', type=str, default='casia100')
+    
+    parser.add_argument('--forget_data_ratio', type=float, default=0.1)
+    parser.add_argument('--remain_data_ratio', type=float, default=0.1)
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -238,6 +242,8 @@ if __name__ == '__main__':
     print(cfg)
     with open(os.path.join(WORK_PATH, 'config.txt'), 'w') as f:
         f.write(str(cfg))
+    with open(os.path.join(WORK_PATH, 'args.txt'), 'w') as f:
+        f.write(str(args))
     print("=" * 60)
 
     wandb.login(key='808d6ef02f3a9c448c5641c132830eb0c3c83c2a')
@@ -289,8 +295,8 @@ if __name__ == '__main__':
     # get sub datasets
     len_forget_dataset_train = len(forget_dataset_train)
     len_remain_dataset_train = len(remain_dataset_train)
-    subset_size_forget = int(len_forget_dataset_train*0.1)
-    subset_size_remain = int(len_remain_dataset_train*0.1)
+    subset_size_forget = int(len_forget_dataset_train*args.forget_data_ratio)
+    subset_size_remain = int(len_remain_dataset_train*args.remain_data_ratio)
 
     subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
     subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
@@ -462,7 +468,14 @@ if __name__ == '__main__':
     BACKBONE.train()  # set to training mode
     forget_acc = []
     remain_acc = []
-
+    
+    # eval before training
+    print("Perform Evaluation on forget test set and remain test set...")
+    forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, 'forget', batch)
+    remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain', batch)
+    wandb.log({"forget_acc_before": forget_acc_before,
+                "remain_acc_before": remain_acc_before})
+    
     for epoch in range(NUM_EPOCH):  # start training process
 
         lr_scheduler.step(epoch)
