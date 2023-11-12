@@ -28,7 +28,8 @@ def train_one_epoch(model:torch.nn.Module,
                     testloader_remain:torch.utils.data.DataLoader,
                     forget_acc_before:float,
                     highest_H_mean:float,
-                    cfg:dict):
+                    cfg:dict,
+                    dataloader_open:torch.utils.data.DataLoader=None):
     """
     Train the model for one epoch and evaluate on test set and save checkpoints
     :return: batch(int), highest_H_mean(int)
@@ -122,9 +123,15 @@ def train_one_epoch(model:torch.nn.Module,
             losses_structure = util.AverageMeter()
 
         if ((batch+1)%VER_FREQ ==0) and batch != 0:
-            highest_H_mean=evaluate(model, testloader_forget=testloader_forget,testloader_remain=testloader_remain, 
-                                    device=device, batch=batch, epoch=epoch,
-                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
+            if dataloader_open is None:
+                highest_H_mean=evaluate(model, testloader_forget=testloader_forget,testloader_remain=testloader_remain, 
+                                        device=device, batch=batch, epoch=epoch,
+                            forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
+            else:
+                highest_H_mean=evaluate(model, testloader_forget=testloader_forget,testloader_remain=testloader_remain, 
+                                        device=device, batch=batch, epoch=epoch,
+                            forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, 
+                            optimizer=optimizer, testloader_open=dataloader_open)
             model.train()
 
         batch+=1
@@ -147,7 +154,8 @@ def evaluate(model:torch.nn.Module,
              forget_acc_before:float,
              highest_H_mean:float,
              cfg:dict,
-             optimizer:torch.optim.Optimizer):
+             optimizer:torch.optim.Optimizer,
+             testloader_open:torch.utils.data.DataLoader=None):
     model.eval()
     for params in optimizer.param_groups:
         lr = params['lr']
@@ -159,7 +167,8 @@ def evaluate(model:torch.nn.Module,
     # 遍历测试集
     forget_acc = eval_data(model, testloader_forget, device, 'forget', batch)
     remain_acc = eval_data(model, testloader_remain, device, 'remain', batch)
-
+    if testloader_open is not None:
+        open_acc = eval_data(model, testloader_open, device, 'open', batch)
     forget_drop = forget_acc_before - forget_acc
     Hmean = 2*forget_drop*remain_acc/(forget_drop+remain_acc)
     
