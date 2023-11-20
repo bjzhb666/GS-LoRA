@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES=0
-NUM_FIRST_CLS=10
-PER_FORGET_CLS=$((100-$NUM_FIRST_CLS))
+export CUDA_VISIBLE_DEVICES=5
+NUM_FIRST_CLS=95
+PER_FORGET_CLS=5
 # lr=1e-2 # 1e-4?
 # for lr in 1e-2
 # do
@@ -52,6 +52,20 @@ PER_FORGET_CLS=$((100-$NUM_FIRST_CLS))
 # --cl_beta_list 0.15 0.25 0.25
 # done
 # done
+
+# retrain
+for lr in 3e-4
+do
+for beta in 0.1 
+do
+    python3 -u train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
+        -head CosFace --outdir /data1/zhaohongbo/exps/forget-CL-baseline/CL-baseline-one/retrain-0-start${NUM_FIRST_CLS}forget${PER_FORGET_CLS}lr${lr} \
+        --warmup-epochs 5 --lr $lr --num_workers 8  --lora_rank 0 --decay-epochs 100 \
+        --vit_depth 6 --num_of_first_cls $NUM_FIRST_CLS --per_forget_cls $PER_FORGET_CLS \
+        -r /data/zhaohongbo/Github/amnesic-face-recognition/Face-Transformer/results/ViT-P8S8_casia100_cosface_s1-1200-150de-depth6-new/Backbone_VIT_Epoch_1110_Batch_82100_Time_2023-10-18-18-22_checkpoint.pth \
+        --BND 110 --min-lr 1e-5 --num_tasks 1 --one_stage --retrain --l2_lambda 0 --wandb_group forget_clbaseline_one_new --replay
+done
+done
 
 # # l2
 # for lr in 1e-4

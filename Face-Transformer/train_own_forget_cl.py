@@ -229,6 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
     parser.add_argument('--n_fisher_sample', default=None, type=int, help='number of fisher sample')
+    parser.add_argument('--retrain', default=False, action='store_true', help='whether to retrain')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
@@ -343,7 +344,7 @@ if __name__ == '__main__':
     print("=" * 60)
 
     # optionally resume from a checkpoint
-    if BACKBONE_RESUME_ROOT:
+    if BACKBONE_RESUME_ROOT and not args.retrain:
         print("=" * 60)
         print(BACKBONE_RESUME_ROOT)
         if os.path.isfile(BACKBONE_RESUME_ROOT):
@@ -566,6 +567,7 @@ if __name__ == '__main__':
             losses_CE = AverageMeter()
             losses_reg = AverageMeter()
             losses_total = AverageMeter()
+            losses_retrain = AverageMeter()
         
         # eval before training
         print("Perform Evaluation on forget train set and remain train set...")
@@ -624,6 +626,40 @@ if __name__ == '__main__':
             
             norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth)
             wandb.log({"norm_list-{}".format(task_i): norm_list})
+        elif args.retrain:
+            losses_total.reset()
+            losses_CE.reset()
+            losses_reg.reset()
+
+            BACKBONE.train()
+            print("start retrain...")
+            # reinitalize the model
+            BACKBONE = BACKBONE_DICT[BACKBONE_NAME]
+            epoch = 0 # 清零以免影响后面task的epoch计算
+            for epoch in range(NUM_EPOCH):  # start training process
+
+                lr_scheduler.step(epoch)
+                batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
+                        model=BACKBONE,
+                        criterion=LOSS,
+                        data_loader_cl_forget=train_loader_total,
+                        optimizer=OPTIMIZER,
+                        device=DEVICE,
+                        epoch=epoch,
+                        batch=batch,
+                        reg_lambda=0,
+                        regularization_terms=None,
+                        losses_CE=losses_CE,
+                        losses_regularization=losses_reg,
+                        losses_total=losses_total,
+                        task_i=task_i,
+                        testloader_forget=testloader_forget,
+                        testloader_remain=testloader_remain,
+                        highest_H_mean=highest_H_mean,
+                        forget_acc_before=forget_acc_before,
+                        cfg=cfg,
+                    )
+                
         else: # CL baselines
             BACKBONE.train()
 
@@ -753,7 +789,7 @@ if __name__ == '__main__':
                     batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
                         model=BACKBONE,
                         criterion=LOSS,
-                        data_loader_cl_forget=train_loader_total,
+                        data_loader_cl_forget=train_loader_remain,
                         optimizer=OPTIMIZER,
                         device=DEVICE,
                         epoch=epoch,

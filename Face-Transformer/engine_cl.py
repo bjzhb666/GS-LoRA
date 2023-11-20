@@ -290,6 +290,8 @@ def get_structure_loss(model:torch.nn.Module):
 
 def get_reg_loss(model:torch.nn.Module, regularization_terms:dict, reg_lambda:float, device:torch.device):
     l2_loss = torch.tensor(0.0, device=device)
+    if regularization_terms is None:
+        return l2_loss
     if isinstance(model, torch.nn.DataParallel):
         model_without_ddp = model.module
     else:

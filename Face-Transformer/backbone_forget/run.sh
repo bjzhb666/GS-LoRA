@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=5
+export CUDA_VISIBLE_DEVICES=4
 NUM_FIRST_CLS=90
 PER_FORGET_CLS=$((100-$NUM_FIRST_CLS))
 # MODEL_PATH=/data/zhaohongbo/Github/amnesic-face-recognition/Face-Transformer/backbone_forget/masking.pth
