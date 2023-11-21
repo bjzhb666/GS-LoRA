@@ -321,7 +321,7 @@ class Attention(nn.Module):
         return out
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=False):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
@@ -329,7 +329,18 @@ class Transformer(nn.Module):
                 Residual(PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout))),
                 Residual(PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout, lora_rank=lora_rank)))
             ]))
+        
+        self.up = up
+        self.depth = depth
     def forward(self, x, mask = None):
+        if self.up:
+            for i, (attn, ff) in enumerate(self.layers):
+                if i < self.depth//2:
+                    continue
+                x = attn(x, mask = mask)
+                #embed()
+                x = ff(x)
+            return x
         for attn, ff in self.layers:
             x = attn(x, mask = mask)
             #embed()
@@ -390,6 +401,150 @@ class ViT_face(nn.Module):
         x += self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
         x = self.transformer(x, mask)
+
+        x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
+
+        x = self.to_latent(x)
+        emb = self.mlp_head(x)
+        if label is not None:
+            x = self.loss(emb, label)
+            return x, emb
+        else:
+            return emb
+
+
+class ViT_face_low(nn.Module):
+    '''
+    ViT_face_low: 用于前半部分的特征提取，返回depth//2层的特征
+    '''
+    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8):
+        super().__init__()
+        assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = channels * patch_size ** 2
+        assert num_patches > MIN_NUM_PATCHES, f'your number of patches ({num_patches}) is way too small for attention to be effective (at least 16). Try decreasing your patch size'
+        assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+
+        self.patch_size = patch_size
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.patch_to_embedding = nn.Linear(patch_dim, dim)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(emb_dropout)
+
+        self.transformer = Transformer(dim, depth//2, heads, dim_head, mlp_dim, dropout, lora_rank)
+        # self.transformer_up = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=True)
+        
+        self.pool = pool
+        self.to_latent = nn.Identity()
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+        )
+        self.loss_type = loss_type
+        self.GPU_ID = GPU_ID
+        if self.loss_type == 'None':
+            print("no loss for vit_face")
+        else:
+            if self.loss_type == 'Softmax':
+                self.loss = Softmax(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'CosFace':
+                self.loss = CosFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'ArcFace':
+                self.loss = ArcFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'SFace':
+                self.loss = SFaceLoss(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+    
+    def forward(self, img, label= None , mask = None):
+        """
+        :return: output 是经过FFN后的特征向量（或者为了特定的loss有其他运算），emb是经过transformer后的特征向量
+        """
+        p = self.patch_size
+
+        x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+        x = self.patch_to_embedding(x)
+        b, n, _ = x.shape
+
+        cls_tokens = repeat(self.cls_token, '() n d -> b n d', b = b)
+        x = torch.cat((cls_tokens, x), dim=1)
+        x += self.pos_embedding[:, :(n + 1)]
+        x = self.dropout(x)
+        x = self.transformer(x, mask)
+        # x = self.transformer_up(x, mask)
+        
+
+        # x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
+
+        # x = self.to_latent(x)
+        # emb = self.mlp_head(x)
+        # if label is not None:
+        #     x = self.loss(emb, label)
+        #     return x, emb
+        # else:
+        #     return emb
+        return x
+    
+
+
+class ViT_face_up(nn.Module):
+    '''
+    ViT_face_up: 用于后半部分的特征提取，返回最终的特征
+    '''
+    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8):
+        super().__init__()
+        assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
+        num_patches = (image_size // patch_size) ** 2
+        patch_dim = channels * patch_size ** 2
+        assert num_patches > MIN_NUM_PATCHES, f'your number of patches ({num_patches}) is way too small for attention to be effective (at least 16). Try decreasing your patch size'
+        assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+
+        self.patch_size = patch_size
+
+        self.pos_embedding = nn.Parameter(torch.randn(1, num_patches + 1, dim))
+        self.patch_to_embedding = nn.Linear(patch_dim, dim)
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+        self.dropout = nn.Dropout(emb_dropout)
+
+        # self.transformer_low = Transformer(dim, depth//2, heads, dim_head, mlp_dim, dropout, lora_rank)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=True)
+        
+        self.pool = pool
+        self.to_latent = nn.Identity()
+
+        self.mlp_head = nn.Sequential(
+            nn.LayerNorm(dim),
+        )
+        self.loss_type = loss_type
+        self.GPU_ID = GPU_ID
+        if self.loss_type == 'None':
+            print("no loss for vit_face")
+        else:
+            if self.loss_type == 'Softmax':
+                self.loss = Softmax(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'CosFace':
+                self.loss = CosFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'ArcFace':
+                self.loss = ArcFace(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+            elif self.loss_type == 'SFace':
+                self.loss = SFaceLoss(in_features=dim, out_features=num_class, device_id=self.GPU_ID)
+    
+    def forward(self, x, label= None , mask = None):
+        """
+        :return: output 是经过FFN后的特征向量（或者为了特定的loss有其他运算），emb是经过transformer后的特征向量
+        """
+        # p = self.patch_size
+
+        # x = rearrange(img, 'b c (h p1) (w p2) -> b (h w) (p1 p2 c)', p1 = p, p2 = p)
+        # x = self.patch_to_embedding(x)
+        # b, n, _ = x.shape
+
+        # cls_tokens = repeat(self.cls_token, '() n d -> b n d', b = b)
+        # x = torch.cat((cls_tokens, x), dim=1)
+        # x += self.pos_embedding[:, :(n + 1)]
+        # x = self.dropout(x)
+        # x = self.transformer_low(x, mask)
+        x = self.transformer(x, mask)
+        
 
         x = x.mean(dim = 1) if self.pool == 'mean' else x[:, 0]
 

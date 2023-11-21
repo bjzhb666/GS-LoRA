@@ -76,4 +76,14 @@ def get_config(args):
     
     if hasattr(args, 'alpha_epoch'):
         configuration['ALPHA_EPOCH'] = args.alpha_epoch
+
+    if hasattr(args, 'per_forget_cls'):
+        configuration['PER_FORGET_CLS'] = args.per_forget_cls
+
+    # parameters for LIRF
+    if hasattr(args, 'LIRF_T'):
+        configuration['LIRF_T'] = args.LIRF_T
+    if hasattr(args, 'LIRF_alpha'):
+        configuration['LIRF_alpha'] = args.LIRF_alpha
+
     return configuration

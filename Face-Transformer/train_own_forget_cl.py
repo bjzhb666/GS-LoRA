@@ -14,7 +14,7 @@ from util.utils import get_val_data, perform_val, get_time, buffer_val, AverageM
 from util.utils import split_dataset
 
 import time
-from vit_pytorch_face import ViT_face
+from vit_pytorch_face import ViT_face, ViT_face_low, ViT_face_up
 from vit_pytorch_face import ViTs_face
 # from IPython import embed
 from timm.scheduler import create_scheduler
@@ -22,7 +22,7 @@ from timm.optim import create_optimizer
 import loralib as lora
 from engine_cl import train_one_epoch, eval_data, train_one_epoch_regularzation
 from torch.utils.data import Subset
-
+from LIRFtrain import train_one_epoch_LIRF, eval_data_LIRF
 from IPython import embed
 
 from util.cal_norm import get_norm_of_lora
@@ -230,6 +230,9 @@ if __name__ == '__main__':
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
     parser.add_argument('--n_fisher_sample', default=None, type=int, help='number of fisher sample')
     parser.add_argument('--retrain', default=False, action='store_true', help='whether to retrain')
+    parser.add_argument('--LIRF',default=False, action='store_true', help='whether to use LIRF')
+    parser.add_argument('--LIRF_T',default=10, type=float, help='lambda for LIRF')
+    parser.add_argument('--LIRF_alpha',default=0.1, type=float, help='lambda for LIRF')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
@@ -377,6 +380,86 @@ if __name__ == '__main__':
         else:
             print("Do not use LoRA in Transformer FFN, train all parameters."
                 )  # 19,157,504 
+    elif args.LIRF:
+        
+        teacher_model_low = ViT_face_low(loss_type=HEAD_NAME,
+                                    GPU_ID=GPU_ID,
+                                    num_class=NUM_CLASS,
+                                    image_size=112,
+                                    patch_size=8,
+                                    dim=512,
+                                    depth=args.vit_depth,
+                                    heads=8,
+                                    mlp_dim=2048,
+                                    dropout=0.1,
+                                    emb_dropout=0.1,
+                                    lora_rank=args.lora_rank)
+        teacher_model_up = ViT_face_up(loss_type=HEAD_NAME,
+                                    GPU_ID=GPU_ID,
+                                    num_class=NUM_CLASS,
+                                    image_size=112,
+                                    patch_size=8,
+                                    dim=512,
+                                    depth=args.vit_depth,
+                                    heads=8,
+                                    mlp_dim=2048,
+                                    dropout=0.1,
+                                    emb_dropout=0.1,
+                                    lora_rank=args.lora_rank)
+        student_model_low = ViT_face_low(loss_type=HEAD_NAME,
+                                    GPU_ID=GPU_ID,
+                                    num_class=NUM_CLASS,
+                                    image_size=112,
+                                    patch_size=8,
+                                    dim=512,
+                                    depth=args.vit_depth,
+                                    heads=8,
+                                    mlp_dim=2048,
+                                    dropout=0.1,
+                                    emb_dropout=0.1,
+                                    lora_rank=args.lora_rank)   
+        deposit_model_low = ViT_face_low(loss_type=HEAD_NAME,
+                                    GPU_ID=GPU_ID,
+                                    num_class=NUM_CLASS,
+                                    image_size=112,
+                                    patch_size=8,
+                                    dim=512,
+                                    depth=args.vit_depth,
+                                    heads=8,
+                                    mlp_dim=2048,
+                                    dropout=0.1,
+                                    emb_dropout=0.1,
+                                    lora_rank=args.lora_rank)
+
+        print('Loading teacher model using the pretrained weights...')
+        teacher_model_low.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+        teacher_model_up.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+        student_model_low.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+        deposit_model_low.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
+        
+        # freeze teacher model, teacher model and student model use the same upper part
+        for n,p in teacher_model_low.named_parameters():
+            p.requires_grad = False
+        for n,p in teacher_model_up.named_parameters():
+            p.requires_grad = False
+        
+        print('Teacher model up parameter names:')
+        for n,p in teacher_model_up.named_parameters():
+            print(n)
+        print('\n')
+        print('\n')
+        
+        print('Student model low parameter names:')
+        for n,p in student_model_low.named_parameters():
+            print(n)
+        
+        BACKBONE = student_model_low
+        teacher_model_low = teacher_model_low.to(DEVICE)
+        teacher_model_up = teacher_model_up.to(DEVICE)
+        deposit_model_low = deposit_model_low.to(DEVICE)
+        
+        deposit_model_low.train()
+
     else: # CL baselines
         for n,p in BACKBONE.named_parameters():
             if 'loss' in n and not args.ffn_open: # 打开梯度
@@ -563,29 +646,66 @@ if __name__ == '__main__':
             top1_remain = AverageMeter()
             losses_total = AverageMeter()
             losses_structure = AverageMeter()
+        elif args.LIRF:
+            # losses_CE, losses_AT, kd_lossesKP, losses_pt_re, losses_total, losses_remain
+            losses_CE = AverageMeter()
+            losses_AT = AverageMeter()
+            kd_lossesKP = AverageMeter()
+            losses_pt_re = AverageMeter()
+            losses_total = AverageMeter()
+            losses_remain = AverageMeter()
         else: # CL baselines
             losses_CE = AverageMeter()
             losses_reg = AverageMeter()
             losses_total = AverageMeter()
             losses_retrain = AverageMeter()
         
-        # eval before training
-        print("Perform Evaluation on forget train set and remain train set...")
-        forget_acc_train_before = eval_data(BACKBONE, train_loader_forget, DEVICE, 'forget-train-{}'.format(task_i), batch)
-        remain_acc_train_before = eval_data(BACKBONE, train_loader_remain, DEVICE, 'remain-train-{}'.format(task_i), batch)
-        print('forget_acc_train_before-{}'.format(task_i), forget_acc_train_before)
-        print('remain_acc_train_before-{}'.format(task_i), remain_acc_train_before)
-        print('\n')
-        print("Perform Evaluation on forget test set and remain test set...")
-        forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, 'forget-{}'.format(task_i), batch)
-        remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain-{}'.format(task_i), batch)
-        wandb.log({"forget_acc_before_{}".format(task_i): forget_acc_before,
-                    "remain_acc_before_{}".format(task_i): remain_acc_before})
-        if task_i > 0:
-            # eval old test set
-            old_acc_before = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
-            wandb.log({"old_acc_before_{}".format(task_i): old_acc_before})
-        
+        if not args.LIRF:
+            # eval before training
+            print("Perform Evaluation on forget train set and remain train set...")
+            forget_acc_train_before = eval_data(BACKBONE, train_loader_forget, DEVICE, 'forget-train-{}'.format(task_i), batch)
+            remain_acc_train_before = eval_data(BACKBONE, train_loader_remain, DEVICE, 'remain-train-{}'.format(task_i), batch)
+            print('forget_acc_train_before-{}'.format(task_i), forget_acc_train_before)
+            print('remain_acc_train_before-{}'.format(task_i), remain_acc_train_before)
+            print('\n')
+            print("Perform Evaluation on forget test set and remain test set...")
+            forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, 'forget-{}'.format(task_i), batch)
+            remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, 'remain-{}'.format(task_i), batch)
+            wandb.log({"forget_acc_before_{}".format(task_i): forget_acc_before,
+                        "remain_acc_before_{}".format(task_i): remain_acc_before})
+            if task_i > 0:
+                # eval old test set
+                old_acc_before = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
+                wandb.log({"old_acc_before_{}".format(task_i): old_acc_before})
+        else:
+            # eval before training LIRF
+            print("LIRF Perform Evaluation on forget train set and remain train set...")
+            forget_acc_train_before = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                                     testloader=train_loader_forget, device=DEVICE,
+                                                     mode='forget-train-{}'.format(task_i), batch=batch)
+            remain_acc_train_before = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                                        testloader=train_loader_remain, device=DEVICE,
+                                                        mode='remain-train-{}'.format(task_i), batch=batch)
+            print('forget_acc_train_before-{}'.format(task_i), forget_acc_train_before)
+            print('remain_acc_train_before-{}'.format(task_i), remain_acc_train_before)
+            print('\n')
+            print("LIRF Perform Evaluation on forget test set and remain test set...")
+            forget_acc_before = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                                testloader=testloader_forget, device=DEVICE,
+                                                mode='forget-{}'.format(task_i), batch=batch)
+            remain_acc_before = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                                testloader=testloader_remain, device=DEVICE,
+                                                mode='remain-{}'.format(task_i), batch=batch)
+            wandb.log({"forget_acc_before_{}".format(task_i): forget_acc_before,
+                        "remain_acc_before_{}".format(task_i): remain_acc_before})
+            if task_i > 0:
+                # eval old test set
+                old_acc_before = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                                testloader=testloader_old, device=DEVICE,
+                                                mode='old-{}'.format(task_i), batch=batch)
+                wandb.log({"old_acc_before_{}".format(task_i): old_acc_before}) 
+
+
         parms_without_ddp = {n:p for n,p in model_without_ddp.named_parameters() if p.requires_grad} # for convenience
         
         if args.one_stage:
@@ -626,6 +746,7 @@ if __name__ == '__main__':
             
             norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth)
             wandb.log({"norm_list-{}".format(task_i): norm_list})
+        
         elif args.retrain:
             losses_total.reset()
             losses_CE.reset()
@@ -659,7 +780,30 @@ if __name__ == '__main__':
                         forget_acc_before=forget_acc_before,
                         cfg=cfg,
                     )
-                
+        
+        elif args.LIRF:
+            BACKBONE.train()
+            deposit_model_low.train()
+
+            print("start LIRF training...")
+            epoch = 0 # 清零以免影响后面task的epoch计算
+            
+            for epoch in range(NUM_EPOCH):  # start training process
+                lr_scheduler.step(epoch)
+    
+                batch, highest_H_mean, losses_CE, losses_AT, kd_lossesKP, losses_pt_re, losses_total, losses_remain = train_one_epoch_LIRF(
+                    student_low=BACKBONE,deposit_low=deposit_model_low,
+                    teacher_low=teacher_model_low,teacher_up=teacher_model_up,
+                    data_loader_cl_forget=train_loader_forget,
+                    remain_loader=train_loader_remain,
+                    criterion=LOSS, optimizer=OPTIMIZER, device=DEVICE,
+                    epoch=epoch, batch=batch,
+                    losses_CE=losses_CE, losses_AT=losses_AT, kd_lossesKP=kd_lossesKP,
+                    losses_pt_re=losses_pt_re, losses_total=losses_total, losses_remain=losses_remain,
+                    task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
+                    highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg
+                )
+
         else: # CL baselines
             BACKBONE.train()
 
@@ -861,9 +1005,27 @@ if __name__ == '__main__':
             torch.save(BACKBONE.state_dict(),
                     os.path.join(WORK_PATH,'task-level','Backbone_task_{}.pth'.
                                 format(task_i)))
+            if args.LIRF:
+                deposit_model_low.eval()
+                torch.save(deposit_model_low.state_dict(),
+                        os.path.join(WORK_PATH,'task-level','deposit_model_low_task_{}.pth'.
+                                    format(task_i)))
+                deposit_model_low.train()
+
+                teacher_model_up.eval()
+                torch.save(teacher_model_up.state_dict(),
+                        os.path.join(WORK_PATH,'task-level','teacher_model_up_task_{}.pth'.
+                                    format(task_i)))
+                
             BACKBONE.train()
         if task_i > 0:
-            old_acc = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
+            if not args.LIRF:
+                old_acc = eval_data(BACKBONE, testloader_old, DEVICE, 'old-{}'.format(task_i), batch)
+            else:
+                old_acc = eval_data_LIRF(student_low=BACKBONE,teacher_up=teacher_model_up,
+                                        testloader=testloader_old, device=DEVICE,
+                                        mode='old-{}'.format(task_i), batch=batch)
+                
             wandb.log({"old_acc_after_{}".format(task_i): old_acc})
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)
@@ -873,4 +1035,8 @@ if __name__ == '__main__':
         wandb.run.name = 'mas'+str(args.mas_lambda) + wandb.run.name
     elif args.l2:
         wandb.run.name = 'l2'+str(args.l2_lambda) + wandb.run.name
+    elif args.retrain:
+        wandb.run.name = 'retrain' + wandb.run.name
+    elif args.LIRF:
+        wandb.run.name = 'LIRF' + wandb.run.name
  
