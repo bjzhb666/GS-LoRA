@@ -85,5 +85,10 @@ def get_config(args):
         configuration['LIRF_T'] = args.LIRF_T
     if hasattr(args, 'LIRF_alpha'):
         configuration['LIRF_alpha'] = args.LIRF_alpha
+    
+    # parameter for SCRUB
+    configuration['lr_decay_rate'] = 0.1
+    configuration['lr_decay_epochs'] = args.scrub_decay_epoch
+    configuration['sgda_learning_rate'] = args.lr
 
     return configuration

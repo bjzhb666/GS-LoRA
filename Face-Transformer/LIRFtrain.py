@@ -116,7 +116,7 @@ def train_one_epoch_LIRF(student_low:torch.nn.Module,deposit_low:torch.nn.Module
 		loss_replay = criterion(student_remain_final, labels_remain)
 		
 		# total loss
-		loss_total = loss_CE -100* loss_AT + 10*kd_lossKP + 10*loss_pt_re + loss_replay
+		loss_total = loss_CE -300* loss_AT + 10*kd_lossKP + 0.05*loss_pt_re + 5*loss_replay
 		
 		losses_total.update(loss_total.item(), inputs_forget.size(0))
 		losses_CE.update(loss_CE.item(), inputs_forget.size(0))

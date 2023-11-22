@@ -23,8 +23,11 @@ import loralib as lora
 from engine_cl import train_one_epoch, eval_data, train_one_epoch_regularzation
 from torch.utils.data import Subset
 from LIRFtrain import train_one_epoch_LIRF, eval_data_LIRF
+
+from SCRUBtrain import train_one_superepoch_SCRUB
 from IPython import embed
 
+import copy
 from util.cal_norm import get_norm_of_lora
 from torch.utils.data import DataLoader
 import math
@@ -155,7 +158,7 @@ if __name__ == '__main__':
         help='lower lr bound for cyclic schedulers that hit 0 (1e-5)')
 
     parser.add_argument('--decay-epochs',
-                        type=float,
+                        type=int,
                         default=30,
                         metavar='N',
                         help='epoch interval to decay LR')
@@ -233,6 +236,18 @@ if __name__ == '__main__':
     parser.add_argument('--LIRF',default=False, action='store_true', help='whether to use LIRF')
     parser.add_argument('--LIRF_T',default=10, type=float, help='lambda for LIRF')
     parser.add_argument('--LIRF_alpha',default=0.1, type=float, help='lambda for LIRF')
+    # SCRUB method
+    parser.add_argument('--SCRUB',default=False, action='store_true', help='whether to use SCRUB')
+    parser.add_argument('--sgda_smoothing', default=0.0, type=float, help='smoothing for sgda')
+    parser.add_argument('--sgda_gamma', default=0.99, type=float, help='gamma for sgda')
+    parser.add_argument('--sgda_alpha', default=0.001, type=float, help='alpha for sgda')
+    parser.add_argument('--sgda_learning_rate', default=1e-4, type=float, help='lr for sgda')
+    parser.add_argument('--sgda_momentum', default=0.9, type=float, help='momentum for sgda')
+    parser.add_argument('--sgda_weight_decay', default=5e-4, type=float, help='weight_decay for sgda')
+    parser.add_argument('--SCRUB_superepoch', default=20, type=int, help='superepoch for sgda')
+    parser.add_argument('--kd_T', default=2.0, type=float, help='temperature for kd loss')
+    parser.add_argument('--scrub_decay_epoch', default=100, type=int, help='decay epoch for sgda')
+    # parser.add_argument('--scrub_decay_rate', default=3, type=int, help='warmup epoch for sgda')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
@@ -436,7 +451,7 @@ if __name__ == '__main__':
         teacher_model_up.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
         student_model_low.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
         deposit_model_low.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
-        
+
         # freeze teacher model, teacher model and student model use the same upper part
         for n,p in teacher_model_low.named_parameters():
             p.requires_grad = False
@@ -460,9 +475,9 @@ if __name__ == '__main__':
         
         deposit_model_low.train()
 
-    else: # CL baselines
+    else: # CL baselines and SCRUB
         for n,p in BACKBONE.named_parameters():
-            if 'loss' in n and not args.ffn_open: # 打开梯度
+            if 'loss' in n and not args.ffn_open: # 最后一层关闭梯度
                 p.requires_grad = False
         
         if args.only_ffn:
@@ -473,7 +488,19 @@ if __name__ == '__main__':
                     p.requires_grad = True
                 else:
                     p.requires_grad = False
-    
+        if args.SCRUB: # deep copy to create two independent models
+            teacher_model = copy.deepcopy(BACKBONE)
+            teacher_model = teacher_model.to(DEVICE)
+            teacher_model.eval()
+            
+            beta = 0.1
+            def avg_fn(averaged_model_parameter, model_parameter, num_averaged): return (
+                1 - beta) * averaged_model_parameter + beta * model_parameter
+            
+            swa_model = torch.optim.swa_utils.AveragedModel(BACKBONE, avg_fn=avg_fn)
+            swa_model = swa_model.to(DEVICE)
+
+
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
     print("learnable_parameters", learnable_parameters)  # 19,157,504
@@ -559,7 +586,7 @@ if __name__ == '__main__':
                                                     drop_last=False)
             
         # prepare datset for regularzation method
-        if not args.one_stage: # CL baselines
+        if not args.one_stage and not args.SCRUB: # CL baselines
             forget_dataset_train_sub = CLDatasetWrapper(forget_dataset_train_sub)
             if args.replay:
                 print('\033[33mConcat datsets\033[0m')
@@ -654,6 +681,32 @@ if __name__ == '__main__':
             losses_pt_re = AverageMeter()
             losses_total = AverageMeter()
             losses_remain = AverageMeter()
+        elif args.SCRUB:
+            losses_CE = AverageMeter()
+            losses_kd_remain = AverageMeter()
+            losses_kd_forget = AverageMeter()
+            losses_total_forget = AverageMeter()
+            losses_total_remain = AverageMeter()
+
+            # change the optimizer in SCRUB
+            trainable_list = nn.ModuleList([])
+            trainable_list.append(BACKBONE)
+
+            if args.opt == "sgd":
+                OPTIMIZER = optim.SGD(trainable_list.parameters(),
+                                    lr=args.sgda_learning_rate,
+                                    momentum=args.sgda_momentum,
+                                    weight_decay=args.sgda_weight_decay)
+            elif args.opt == "adam": 
+                OPTIMIZER = optim.Adam(trainable_list.parameters(),
+                                    lr=args.sgda_learning_rate,
+                                    weight_decay=args.sgda_weight_decay)
+            elif args.opt == "rmsp":
+                OPTIMIZER = optim.RMSprop(trainable_list.parameters(),
+                                    lr=args.sgda_learning_rate,
+                                    momentum=args.sgda_momentum,
+                                    weight_decay=args.sgda_weight_decay)
+                
         else: # CL baselines
             losses_CE = AverageMeter()
             losses_reg = AverageMeter()
@@ -804,6 +857,34 @@ if __name__ == '__main__':
                     highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg
                 )
 
+        elif args.SCRUB:
+            losses_CE.reset()
+            losses_kd_remain.reset()
+            losses_kd_forget.reset()
+            losses_total_forget.reset()
+            losses_total_remain.reset()
+
+            BACKBONE.train()
+            teacher_model.eval()
+
+            print("start SCRUB training...")
+            epoch = 0
+            for epoch in range(args.SCRUB_superepoch):
+                # lr_scheduler.step(epoch)
+                batch, highest_H_mean, losses_CE, losses_total_forget, \
+                    losses_total_remain, losses_kd_forget, losses_kd_remain, swa_model  = train_one_superepoch_SCRUB(
+                        student=BACKBONE, teacher=teacher_model, swa_model=swa_model,
+                        data_loader_forget = train_loader_forget, remain_loader=train_loader_remain,
+                        criterion=LOSS, optimizer=OPTIMIZER, device=DEVICE,
+                        superepoch=epoch, batch=batch, losses_CE=losses_CE,
+                        losses_total_forget=losses_total_forget, losses_total_remain=losses_total_remain,
+                        losses_kd_forget=losses_kd_forget, losses_kd_remain=losses_kd_remain,
+                        task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
+                        highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
+                        kd_T=args.kd_T, sgda_smoothing=args.sgda_smoothing, sgda_gamma=args.sgda_gamma,
+                        sgda_alpha=args.sgda_alpha
+                )   
+                
         else: # CL baselines
             BACKBONE.train()
 
@@ -1039,4 +1120,5 @@ if __name__ == '__main__':
         wandb.run.name = 'retrain' + wandb.run.name
     elif args.LIRF:
         wandb.run.name = 'LIRF' + wandb.run.name
- 
+    elif args.SCRUB:
+        wandb.run.name = 'SCRUB' +str(args.sgda_smoothing)+ wandb.run.name 
