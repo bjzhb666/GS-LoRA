@@ -244,7 +244,7 @@ if __name__ == '__main__':
     parser.add_argument('--sgda_learning_rate', default=1e-4, type=float, help='lr for sgda')
     parser.add_argument('--sgda_momentum', default=0.9, type=float, help='momentum for sgda')
     parser.add_argument('--sgda_weight_decay', default=5e-4, type=float, help='weight_decay for sgda')
-    parser.add_argument('--SCRUB_superepoch', default=20, type=int, help='superepoch for sgda')
+    parser.add_argument('--SCRUB_superepoch', default=10, type=int, help='superepoch for sgda')
     parser.add_argument('--kd_T', default=2.0, type=float, help='temperature for kd loss')
     parser.add_argument('--scrub_decay_epoch', default=100, type=int, help='decay epoch for sgda')
     # parser.add_argument('--scrub_decay_rate', default=3, type=int, help='warmup epoch for sgda')

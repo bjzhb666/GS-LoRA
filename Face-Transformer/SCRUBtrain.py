@@ -35,9 +35,9 @@ def train_one_superepoch_SCRUB(student:torch.nn.Module, teacher: torch.nn.Module
     VER_FREQ = 5
     # forget data update and remain data update
     for i in range(10): 
-        if i<5: # max steps
-            print('\033[0;31;40mmax steps\033[0m')
-            epoch = superepoch*10 + i
+        if i<5: # max steps + min steps
+            print('\033[0;31;40mmax steps + min steps\033[0m')
+            epoch = superepoch*15 + i
             # lr_scheduler.step(epoch)
             lr = sgda_adjust_learning_rate(epoch, cfg, optimizer)
 
@@ -56,7 +56,7 @@ def train_one_superepoch_SCRUB(student:torch.nn.Module, teacher: torch.nn.Module
                 # compute SGDA loss
                 loss_sgda = param_dist(student, swa_model, p=sgda_smoothing)
                 # total loss
-                loss = loss_kd + loss_sgda
+                loss = - loss_kd + loss_sgda
 
                 losses_total_forget.update(loss.item(), inputs_forget.size(0))
                 losses_kd_forget.update(loss_kd.item(), inputs_forget.size(0))
@@ -86,72 +86,125 @@ def train_one_superepoch_SCRUB(student:torch.nn.Module, teacher: torch.nn.Module
 
                 batch += 1
 
-                           
-        # min steps
-        print('\033[0;31;40mmin steps\033[0m')
-        epoch = superepoch*10 + i
-        # lr_scheduler.step(epoch)
-        lr = sgda_adjust_learning_rate(epoch, cfg, optimizer)
-        
-        for inputs_remain, labels_remain in iter(remain_loader):
-            inputs_remain = inputs_remain.to(device)
-            labels_remain = labels_remain.to(device)
+            for inputs_remain, labels_remain in iter(remain_loader):
+                inputs_remain = inputs_remain.to(device)
+                labels_remain = labels_remain.to(device)
 
-            outputs_remain, _ = student(inputs_remain.float(), labels_remain)
+                outputs_remain, _ = student(inputs_remain.float(), labels_remain)
 
-            # compute teacher outputs
-            with torch.no_grad():
-                teacher_outputs, _ = teacher(inputs_remain.float(), labels_remain)
+                # compute teacher outputs
+                with torch.no_grad():
+                    teacher_outputs, _ = teacher(inputs_remain.float(), labels_remain)
 
-            # compute kd loss
-            loss_kd = criterionKD(outputs_remain, teacher_outputs)
-            # compute CE loss
-            loss_CE = criterion(outputs_remain, labels_remain)
-            # compute SGDA loss
-            loss_sgda = param_dist(student, swa_model, p=sgda_smoothing)
+                # compute kd loss
+                loss_kd = criterionKD(outputs_remain, teacher_outputs)
+                # compute CE loss
+                loss_CE = criterion(outputs_remain, labels_remain)
+                # compute SGDA loss
+                loss_sgda = param_dist(student, swa_model, p=sgda_smoothing)
+                
+                # total loss
+                loss = sgda_gamma * loss_CE + sgda_alpha * loss_kd + loss_sgda
+
+                losses_total_remain.update(loss.item(), inputs_remain.size(0))
+                losses_kd_remain.update(loss_kd.item(), inputs_remain.size(0))
+                losses_CE.update(loss_CE.item(), inputs_remain.size(0))
+
+                # ===================backward=====================
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                # display training loss and accuracy every DISP_FREQ
+                if ((batch+1)%DISP_FREQ==0) and batch!=0:
+                    epoch_loss_kd_remain = losses_kd_remain.avg
+                    epoch_loss_total_remain = losses_total_remain.avg
+                    epoch_loss_CE = losses_CE.avg
+
+                    wandb.log({'epoch_loss_kd_remain-{}'.format(task_i): epoch_loss_kd_remain,
+                                'epoch_loss_total_remain-{}'.format(task_i): epoch_loss_total_remain,
+                                'epoch_loss_CE-{}'.format(task_i): epoch_loss_CE})
+                    
+                    print('Task {} Epoch {} Batch {}\t'
+                            'Remain Training kd Loss {loss_kd.val:.4f} ({loss_kd.avg:.4f})\t'
+                            'Remain Training total Loss {loss_total.val:.4f} ({loss_total.avg:.4f})\t'
+                            'Remain Training CE Loss {loss_CE.val:.4f} ({loss_CE.avg:.4f})\t'.format(
+                                task_i, epoch+1, batch+1,
+                                loss_kd=losses_kd_remain, loss_total=losses_total_remain, loss_CE=losses_CE))
+                    
+                    # reset average meters
+                    losses_kd_remain.reset()
+                    losses_total_remain.reset()
+                    losses_CE.reset()
+
+                batch += 1
+
+        else:                 
+            # min steps
+            print('\033[0;31;40mmin steps\033[0m')
+            epoch = superepoch*15 + i
+            # lr_scheduler.step(epoch)
+            lr = sgda_adjust_learning_rate(epoch, cfg, optimizer)
             
-            # total loss
-            loss = sgda_gamma * loss_CE + sgda_alpha * loss_kd + loss_sgda
+            for inputs_remain, labels_remain in iter(remain_loader):
+                inputs_remain = inputs_remain.to(device)
+                labels_remain = labels_remain.to(device)
 
-            losses_total_remain.update(loss.item(), inputs_remain.size(0))
-            losses_kd_remain.update(loss_kd.item(), inputs_remain.size(0))
-            losses_CE.update(loss_CE.item(), inputs_remain.size(0))
+                outputs_remain, _ = student(inputs_remain.float(), labels_remain)
 
-            # ===================backward=====================
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # compute teacher outputs
+                with torch.no_grad():
+                    teacher_outputs, _ = teacher(inputs_remain.float(), labels_remain)
 
-            # display training loss and accuracy every DISP_FREQ
-            if ((batch+1)%DISP_FREQ==0) and batch!=0:
-                epoch_loss_kd_remain = losses_kd_remain.avg
-                epoch_loss_total_remain = losses_total_remain.avg
-                epoch_loss_CE = losses_CE.avg
-
-                wandb.log({'epoch_loss_kd_remain-{}'.format(task_i): epoch_loss_kd_remain,
-                            'epoch_loss_total_remain-{}'.format(task_i): epoch_loss_total_remain,
-                            'epoch_loss_CE-{}'.format(task_i): epoch_loss_CE})
+                # compute kd loss
+                loss_kd = criterionKD(outputs_remain, teacher_outputs)
+                # compute CE loss
+                loss_CE = criterion(outputs_remain, labels_remain)
+                # compute SGDA loss
+                loss_sgda = param_dist(student, swa_model, p=sgda_smoothing)
                 
-                print('Task {} Epoch {} Batch {}\t'
-                        'Remain Training kd Loss {loss_kd.val:.4f} ({loss_kd.avg:.4f})\t'
-                        'Remain Training total Loss {loss_total.val:.4f} ({loss_total.avg:.4f})\t'
-                        'Remain Training CE Loss {loss_CE.val:.4f} ({loss_CE.avg:.4f})\t'.format(
-                            task_i, epoch+1, batch+1,
-                            loss_kd=losses_kd_remain, loss_total=losses_total_remain, loss_CE=losses_CE))
-                
-                # reset average meters
-                losses_kd_remain.reset()
-                losses_total_remain.reset()
-                losses_CE.reset()
+                # total loss
+                loss = sgda_gamma * loss_CE + sgda_alpha * loss_kd + loss_sgda
 
-            if ((batch+1)%VER_FREQ==0) and batch!=0:
-                highest_H_mean = evaluate(student, testloader_forget=testloader_forget,testloader_remain=testloader_remain,
-                                    device=device, batch=batch, epoch=epoch, task_i=task_i,
-                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
-                student.train()
+                losses_total_remain.update(loss.item(), inputs_remain.size(0))
+                losses_kd_remain.update(loss_kd.item(), inputs_remain.size(0))
+                losses_CE.update(loss_CE.item(), inputs_remain.size(0))
 
-            batch += 1
-    
+                # ===================backward=====================
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                # display training loss and accuracy every DISP_FREQ
+                if ((batch+1)%DISP_FREQ==0) and batch!=0:
+                    epoch_loss_kd_remain = losses_kd_remain.avg
+                    epoch_loss_total_remain = losses_total_remain.avg
+                    epoch_loss_CE = losses_CE.avg
+
+                    wandb.log({'epoch_loss_kd_remain-{}'.format(task_i): epoch_loss_kd_remain,
+                                'epoch_loss_total_remain-{}'.format(task_i): epoch_loss_total_remain,
+                                'epoch_loss_CE-{}'.format(task_i): epoch_loss_CE})
+                    
+                    print('Task {} Epoch {} Batch {}\t'
+                            'Remain Training kd Loss {loss_kd.val:.4f} ({loss_kd.avg:.4f})\t'
+                            'Remain Training total Loss {loss_total.val:.4f} ({loss_total.avg:.4f})\t'
+                            'Remain Training CE Loss {loss_CE.val:.4f} ({loss_CE.avg:.4f})\t'.format(
+                                task_i, epoch+1, batch+1,
+                                loss_kd=losses_kd_remain, loss_total=losses_total_remain, loss_CE=losses_CE))
+                    
+                    # reset average meters
+                    losses_kd_remain.reset()
+                    losses_total_remain.reset()
+                    losses_CE.reset()
+
+                if ((batch+1)%VER_FREQ==0) and batch!=0:
+                    highest_H_mean = evaluate(student, testloader_forget=testloader_forget,testloader_remain=testloader_remain,
+                                        device=device, batch=batch, epoch=epoch, task_i=task_i,
+                            forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
+                    student.train()
+
+                batch += 1
+        
     swa_model.update_parameters(student)
 
     return batch, highest_H_mean, losses_CE, losses_total_forget, losses_total_remain, losses_kd_forget, losses_kd_remain, swa_model
