@@ -816,7 +816,7 @@ if __name__ == '__main__':
                 batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
                         model=BACKBONE,
                         criterion=LOSS,
-                        data_loader_cl_forget=train_loader_total,
+                        data_loader_cl_forget=train_loader_remain,
                         optimizer=OPTIMIZER,
                         device=DEVICE,
                         epoch=epoch,
@@ -1010,11 +1010,11 @@ if __name__ == '__main__':
             
             for epoch in range(NUM_EPOCH):
                 lr_scheduler.step(epoch)
-                if args.replay:
+                if args.replay: # use train_loader_total
                     batch,highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
                         model=BACKBONE,
                         criterion=LOSS,
-                        data_loader_cl_forget=train_loader_remain,
+                        data_loader_cl_forget=train_loader_total,
                         optimizer=OPTIMIZER,
                         device=DEVICE,
                         epoch=epoch,

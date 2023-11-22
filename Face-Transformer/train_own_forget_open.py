@@ -7,7 +7,7 @@ import torchvision.datasets as datasets
 import wandb
 import random
 from config import get_config
-from image_iter import FaceDataset
+from image_iter import CLDatasetWrapper, CustomSubset
 
 from util.utils import separate_irse_bn_paras, separate_resnet_bn_paras, separate_mobilefacenet_bn_paras
 from util.utils import get_val_data, perform_val, get_time, buffer_val, AverageMeter, train_accuracy
@@ -21,11 +21,13 @@ from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
 from engine import train_one_epoch, eval_data
+from engine_cl import train_one_epoch_regularzation
 from torch.utils.data import Subset
 
 from IPython import embed
 
 from util.cal_norm import get_norm_of_lora
+from torch.utils.data import DataLoader
 
 def count_trainable_parameters(model):
     total_params = sum(p.numel() for p in model.parameters()
@@ -205,6 +207,7 @@ if __name__ == '__main__':
     # mode selection
     parser.add_argument('--one_stage',default=True, action='store_false', help='whether to use one stage training')
     parser.add_argument('--l2',default=False, action='store_true', help='whether to use l2 norm')
+    parser.add_argument('--l2_lambda',default=0.1, type=float, help='lambda for l2 norm')
     parser.add_argument('--ewc',default=False, action='store_true', help='whether to use ewc')
     parser.add_argument('--ewc_lambda',default=0.1, type=float, help='lambda for ewc')
     parser.add_argument('--MAS', default=False, action='store_true', help='whether to use mas')
@@ -213,6 +216,7 @@ if __name__ == '__main__':
     parser.add_argument('--si_c', default=0.1, type=float, help='c for si')
     parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
+    parser.add_argument('--retrain', default=False, action='store_true', help='whether to retrain')
     # wramup for alpha
     parser.add_argument('--warmup_alpha', default=False, action='store_true', help='whether to use warmup_alpha')
     parser.add_argument('--big_alpha', default=0, type=float, help='big alpha for warmup_alpha')
@@ -227,6 +231,9 @@ if __name__ == '__main__':
     parser.add_argument('--data_ratio', default=0.1, type=float, help='data ratio')
     # open class number
     parser.add_argument('--open_cls_num', default=10, type=int, help='open class number')
+
+    # output FFN freeze
+    parser.add_argument('--ffn_open', default=False, action='store_true', help='whether to freeze ffn')
     args = parser.parse_args()
 
     #======= hyperparameters & data loaders =======#
@@ -313,7 +320,10 @@ if __name__ == '__main__':
     en2 = en3+args.per_forget_cls # 90+10
    
     print('st1, en1, st2, en2, st3, en3', st1, en1, st2, en2, st3, en3)
-    # 2. split datasets
+    # 2. split datasets: 
+    #  - forget set
+    #  - remain set (classes should be retained with replay), 
+    #  - open set (classes should be retrained without replay)
     train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)
     test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
     remain_dataset_train, open_dataset_train = split_dataset(dataset=train_dataset,
@@ -371,11 +381,17 @@ if __name__ == '__main__':
     subset_indices_forget = torch.randperm(len_forget_dataset_train)[:subset_size_forget]
     subset_indices_remain = torch.randperm(len_remain_dataset_train)[:subset_size_remain]
 
-    forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
-    remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
+    forget_dataset_train_sub = CustomSubset(forget_dataset_train, subset_indices_forget)
+    remain_dataset_train_sub = CustomSubset(remain_dataset_train, subset_indices_remain)
 
     # get remain all datasets
     remain_dataset_test_all = torch.utils.data.ConcatDataset([remain_dataset_test, open_dataset_test])
+    
+    if not args.one_stage:
+        forget_dataset_train_sub = CLDatasetWrapper(forget_dataset_train_sub)
+        # get total available training datasets
+        print('\033[33mConcat forget datsets and remain datasets\033[0m')
+        total_dataset_train = torch.utils.data.ConcatDataset([forget_dataset_train_sub, remain_dataset_train_sub])
     
     train_loader_forget = torch.utils.data.DataLoader(forget_dataset_train_sub,
                                               batch_size=BATCH_SIZE,
@@ -408,6 +424,11 @@ if __name__ == '__main__':
                                                 num_workers=WORKERS,
                                                 drop_last=False)
     
+    train_loader_total = torch.utils.data.DataLoader(total_dataset_train,
+                                                batch_size=BATCH_SIZE,
+                                                shuffle=True,
+                                                num_workers=WORKERS,
+                                                drop_last=False)
     
     print('len(train_loader_forget)', len(train_loader_forget))
     print('len(train_loader_remain)', len(train_loader_remain))
@@ -475,7 +496,7 @@ if __name__ == '__main__':
     lr_scheduler, _ = create_scheduler(args, OPTIMIZER)
 
     # optionally resume from a checkpoint
-    if BACKBONE_RESUME_ROOT:
+    if BACKBONE_RESUME_ROOT and not args.retrain:
         print("=" * 60)
         print(BACKBONE_RESUME_ROOT)
         if os.path.isfile(BACKBONE_RESUME_ROOT):
@@ -497,16 +518,32 @@ if __name__ == '__main__':
                 "No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch"
                 .format(BACKBONE_RESUME_ROOT))
         print("=" * 60)
-
-    if args.lora_rank > 0:
-        lora.mark_only_lora_as_trainable(BACKBONE)
-        print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
-        # for n,p in BACKBONE.named_parameters():
-        #     if 'loss.weight' in n: # 打开梯度
-        #         p.requires_grad = True
-    else:
-        print("Do not use LoRA in Transformer FFN, train all parameters."
-              )  # 19,157,504
+    
+    # Create importance dataset and dataloader for the first task in CL methods
+    len_importance_dataset_train = len(train_dataset)
+    subset_size_importance = int(len_importance_dataset_train*0.1)
+    subset_indices_importance = torch.randperm(len_importance_dataset_train)[:subset_size_importance]
+    importance_dataset_train = Subset(train_dataset, subset_indices_importance)
+    importance_dataloader_train = torch.utils.data.DataLoader(importance_dataset_train,
+                                                    batch_size=BATCH_SIZE,
+                                                    shuffle=True,
+                                                    num_workers=WORKERS,
+                                                    drop_last=False)
+    if args.one_stage:
+        if args.lora_rank > 0:
+            lora.mark_only_lora_as_trainable(BACKBONE)
+            print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
+            # for n,p in BACKBONE.named_parameters():
+            #     if 'loss.weight' in n: # 打开梯度
+            #         p.requires_grad = True
+        else:
+            print("Do not use LoRA in Transformer FFN, train all parameters."
+                )  # 19,157,504
+    else: # CL baselines
+        for n,p in BACKBONE.named_parameters():
+            if 'loss' in n and not args.ffn_open: # 关闭FFN output的梯度
+                p.requires_grad = False
+            
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
     print("learnable_parameters", learnable_parameters)  # 19,157,504
@@ -529,17 +566,26 @@ if __name__ == '__main__':
     #======= train & validation & save checkpoint =======#
 
     batch = 0  # batch index
+    if args.one_stage:
+        losses_forget = AverageMeter()
+        top1_forget = AverageMeter()
+        losses_remain = AverageMeter()
+        top1_remain = AverageMeter()
+        losses_total = AverageMeter()
+        losses_structure = AverageMeter()
+    else:
+        losses_CE = AverageMeter()
+        losses_reg = AverageMeter()
+        losses_total = AverageMeter()
+        losses_retrain = AverageMeter()
 
-    losses_forget = AverageMeter()
-    top1_forget = AverageMeter()
-    losses_remain = AverageMeter()
-    top1_remain = AverageMeter()
-    losses_total = AverageMeter()
-    losses_structure = AverageMeter()
 
     BACKBONE.train()  # set to training mode
 
     model_without_ddp = BACKBONE.module if MULTI_GPU else BACKBONE
+
+    regularization_terms = {}
+    parms_without_ddp = {n:p for n,p in model_without_ddp.named_parameters() if p.requires_grad} 
 
     # eval before training
     print("Perform Evaluation on forget train set and remain train set...")
@@ -557,54 +603,245 @@ if __name__ == '__main__':
                 "remain_acc_before": remain_acc_before,
                 "open_acc_before": open_acc_before,
                 "remain_all_acc_before": remain_all_acc_before})
-    BACKBONE.train()  # set to training mode
-    for epoch in range(NUM_EPOCH):  # start training process
-        if args.warmup_alpha:
-            if epoch < args.alpha_epoch:
-                args.alpha=0
-            else:
-                args.alpha=args.big_alpha
-        if args.beta_decay:
-            if epoch < 50:
-                args.beta=args.beta
-            else:
-                args.beta = args.small_beta
-        lr_scheduler.step(epoch)
+    if args.one_stage:
+        BACKBONE.train()  # set to training mode
+        print("start GS-LoRA training...")
+        for epoch in range(NUM_EPOCH):  # start training process
+            if args.warmup_alpha:
+                if epoch < args.alpha_epoch:
+                    args.alpha=0
+                else:
+                    args.alpha=args.big_alpha
+            if args.beta_decay:
+                if epoch < 50:
+                    args.beta=args.beta
+                else:
+                    args.beta = args.small_beta
+            lr_scheduler.step(epoch)
 
-        batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure = train_one_epoch(
-            model=BACKBONE,
-            dataloader_forget=train_loader_forget,
-            dataloader_remain=train_loader_remain,
-            testloader_forget=testloader_forget,
-            testloader_remain=testloader_remain,
-            dataloader_open=testloader_open,
-            device=DEVICE,
-            criterion=LOSS,
-            optimizer=OPTIMIZER,
-            epoch=epoch,
-            batch=batch,
-            losses_forget=losses_forget,
-            top1_forget=top1_forget,
-            losses_remain=losses_remain,
-            top1_remain=top1_remain,
-            losses_total=losses_total,
-            losses_structure=losses_structure,
-            beta=args.beta,
-            BND=args.BND,
-            forget_acc_before=forget_acc_before,
-            highest_H_mean=highest_H_mean,
-            cfg=cfg,
-            alpha=args.alpha)
+            batch, highest_H_mean, losses_forget, losses_remain, top1_forget, top1_remain, losses_total, losses_structure = train_one_epoch(
+                model=BACKBONE,
+                dataloader_forget=train_loader_forget,
+                dataloader_remain=train_loader_remain,
+                testloader_forget=testloader_forget,
+                testloader_remain=testloader_remain,
+                dataloader_open=testloader_open,
+                device=DEVICE,
+                criterion=LOSS,
+                optimizer=OPTIMIZER,
+                epoch=epoch,
+                batch=batch,
+                losses_forget=losses_forget,
+                top1_forget=top1_forget,
+                losses_remain=losses_remain,
+                top1_remain=top1_remain,
+                losses_total=losses_total,
+                losses_structure=losses_structure,
+                beta=args.beta,
+                BND=args.BND,
+                forget_acc_before=forget_acc_before,
+                highest_H_mean=highest_H_mean,
+                cfg=cfg,
+                alpha=args.alpha)
         # print(batch)
+    
+    elif args.retrain:
+        losses_total.reset()
+        losses_CE.reset()
+        losses_reg.reset()
+
+        BACKBONE.train()  # set to training mode
+        print("start retrain...")
+        epoch = 0
+        for epoch in range(NUM_EPOCH):  # start training process
+
+            lr_scheduler.step(epoch)
+            batch,highest_H_mean, losses_CE, losses_reg, losses_total = train_one_epoch_regularzation(
+                model=BACKBONE,
+                criterion=LOSS,
+                data_loader_cl_forget=train_loader_remain,
+                optimizer=OPTIMIZER,
+                device=DEVICE,
+                epoch=epoch,
+                batch=batch,
+                reg_lambda=0,
+                regularization_terms=None,
+                losses_CE=losses_CE,
+                losses_regularization=losses_reg,
+                losses_total=losses_total,
+                task_i='0',
+                testloader_forget=testloader_forget,
+                testloader_remain=testloader_remain,
+                highest_H_mean=highest_H_mean,
+                forget_acc_before=forget_acc_before,
+                cfg=cfg,)
+        
+    else: # CL baselines
+        BACKBONE.train()
+        print("start CL baselines...")
+        # 1. backup the weight of current task
+        task_param={}
+        model_without_ddp = BACKBONE.module if MULTI_GPU else BACKBONE
+        for n,p in model_without_ddp.named_parameters():
+            if p.requires_grad:
+                task_param[n]=p.data.clone().detach()
+
+        # 2. Calculate the Information Matrix
+        if args.l2:
+            def calculate_importance_l2(model, dataloader):
+                    # Use an identity importance so it is an L2 regularization.
+                    print("\033[32mcalculate_importance_l2\033[0m")
+                    importance = {}
+                    for n, p in model.named_parameters():
+                        if p.requires_grad:
+                            importance[n] = p.clone().detach().fill_(1)  # Identity
+                    return importance
+                
+            importance = calculate_importance_l2(model_without_ddp, importance_dataloader_train)
+            regularization_terms[0] = {'importance':importance,'task_param':task_param}
+        
+        elif args.ewc:
+            def calculate_importance_ewc(model, dataloader):
+                print('\033[32mcalculate importance of ewc...\033[0m')
+
+                # Initialize the importance matrix
+                if args.online and len(regularization_terms) > 0:
+                    importance = regularization_terms[0]['importance']
+                else:
+                    importance = {}
+                    for n, p in model_without_ddp.named_parameters():
+                        if p.requires_grad:
+                            importance[n] = p.clone().detach().fill_(0) # zero initialization
+
+                
+                # Sample a subset (n_fisher_sample) of data to estimate the importance matrix (batch size is 1)
+                # Otherwise it uses mini-batch to estimate the importance matrix. This speeds up the process a lot with similar performance.
+
+                if args.n_fisher_sample is not None: 
+                    # FIXME: there is a bug RuntimeError:  Trying to resize storage that is not resizable
+                    n_sample = min(args.n_fisher_sample, len(dataloader.dataset))
+                    print('Sample', args.n_fisher_sample, 'data to estimate the importance matrix')
+                    rand_ind = random.sample(list(range(len(dataloader.dataset))), n_sample)
+                    subdata = torch.utils.data.Subset(dataloader.dataset, rand_ind)
+                    subdataloader = DataLoader(subdata, batch_size=2, shuffle=True, num_workers=args.num_workers, pin_memory=True)
+                else:
+                    subdataloader = dataloader 
+                
+                model.eval()
+                # Accumulate the square of gradients
+                for i,(samples, targets) in enumerate(subdataloader):
+                    samples = samples.to(DEVICE)
+                
+                    targets = targets.to(DEVICE)
+                    # if dist.get_rank()==0:
+                    #     import pdb; pdb.set_trace()
+                    outputs, embeds = model(samples.float(), targets)
+                    
+                    losses = LOSS(outputs, targets)
+
+                    model.zero_grad()
+                    losses.backward()
+                    for n,p in importance.items():
+                        if parms_without_ddp[n].grad is not None: # some parameters may not have grad
+                            p +=((parms_without_ddp[n].grad**2)*len(samples)/len(subdataloader))
+                
+                model.train()
+                return importance
+            
+            importance = calculate_importance_ewc(model_without_ddp, importance_dataloader_train) # 第一个任务此时需要的是全部数据集
+            regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+
+        elif args.MAS:
+            def calculate_importance_mas(model, dataloader):
+                print('\033[32mcalculate importance of mas...\033[0m')
+
+                # Initialize the importance matrix
+                if args.online and len(regularization_terms) > 0:
+                    importance = regularization_terms[0]['importance']
+                else:
+                    importance = {}
+                    for n, p in model_without_ddp.named_parameters():
+                        if p.requires_grad:
+                            importance[n] = p.clone().detach().fill_(0) # zero initialization
+
+                model.eval()
+
+                # 网络输出logits的L2范数的平方作为loss，对其求偏导，得到梯度
+                for i, (samples, targets) in enumerate(dataloader):
+                    samples = samples.to(DEVICE)
+                    targets = targets.to(DEVICE)
+
+                    outputs, embeds = model(samples.float(), targets)
+                
+                    outputs.pow_(2)
+                    loss = outputs.mean()
+
+                    model.zero_grad()
+                    loss.backward()
+
+                    for n,p in importance.items():
+                        if parms_without_ddp[n].grad is not None:
+                            p +=(parms_without_ddp[n].grad.abs()/len(dataloader))
+
+                model.train()
+                return importance  
+
+            importance = calculate_importance_mas(model_without_ddp, importance_dataloader_train) # 第一个任务此时需要的是全部数据集
+            regularization_terms[0] = {'importance':importance, 'task_param':task_param}
+
+        # 1. learn current task
+        epoch = 0
+        if args.l2:
+            reg_lambda = args.l2_lambda
+        elif args.ewc:
+            reg_lambda = args.ewc_lambda
+        elif args.MAS:
+            reg_lambda = args.mas_lambda
+
+        for epoch in range(NUM_EPOCH):  # start training process
+            lr_scheduler.step(epoch)
+            batch, highest_H_mean, losses_CE, losses_reg, losses_total=train_one_epoch_regularzation(
+                    model=BACKBONE,
+                    criterion=LOSS,
+                    data_loader_cl_forget=train_loader_total,
+                    optimizer=OPTIMIZER,
+                    device=DEVICE,
+                    epoch=epoch,
+                    batch=batch,
+                    reg_lambda=reg_lambda,
+                    regularization_terms=regularization_terms,
+                    losses_CE=losses_CE,
+                    losses_regularization=losses_reg,
+                    losses_total=losses_total,
+                    task_i='0',
+                    testloader_forget=testloader_forget,
+                    testloader_remain=testloader_remain,
+                    highest_H_mean=highest_H_mean,
+                    forget_acc_before=forget_acc_before,
+                    cfg=cfg,
+                    testloader_open=testloader_open)
+
+
     remain_all_acc_after= eval_data(BACKBONE, testloader_remain_all, DEVICE, 'remain_all', batch)
     print('remain_all_acc_after', remain_all_acc_after)
     wandb.log({"remain_all_acc_after": remain_all_acc_after})
     # calculate norm list
-    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth, group_type=args.grouping)
-    wandb.log({"norm_list": norm_list})
+    if args.one_stage:
+        norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth, group_type=args.grouping)
+        wandb.log({"norm_list": norm_list})
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \
     +'-lora_rank-'+str(args.lora_rank)+'beta'+str(args.beta)+'lr'+str(args.lr)+'BND'+str(args.BND)+'alpha'+str(args.alpha)
     if args.warmup_alpha:
         wandb.run.name = wandb.run.name + '-warmup_alpha'+str(args.big_alpha)
+    
     wandb.run.name=wandb.run.name+'-opencls'+str(args.open_cls_num)
+
+    if args.ewc:
+        wandb.run.name='ewc_lambda'+str(args.ewc_lambda)+wandb.run.name
+    elif args.MAS:
+        wandb.run.name='mas_lambda'+str(args.mas_lambda)+wandb.run.name
+    elif args.l2:
+        wandb.run.name='l2_lambda'+str(args.l2_lambda)+wandb.run.name
+    elif args.retrain:
+        wandb.run.name='retrain'+wandb.run.name

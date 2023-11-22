@@ -96,7 +96,7 @@ def train_one_epoch(model:torch.nn.Module,
                           "epoch_acc_forget": epoch_acc_forget,
                           "epoch_acc_remain": epoch_acc_remain,
                           "epoch_loss_total":epoch_loss_total,
-                          "epoch_loss_structure":epoch_loss_structure}, step=batch+1)
+                          "epoch_loss_structure":epoch_loss_structure})
 
             print('Epoch {} Batch {}\t'
                       'Training forget Loss {loss_forget.val:.4f} ({loss_forget.avg:.4f})\t'
@@ -223,7 +223,7 @@ def eval_data(model:torch.nn.Module,
     # 打印测试精度
     accuracy = 100 * correct / total
     print('Test {} Accuracy:{:2f}%'.format(mode, accuracy))
-    wandb.log({"Test {} Accuracy".format(mode): accuracy}, step=batch+1)
+    wandb.log({"Test {} Accuracy".format(mode): accuracy})
 
     return accuracy
 

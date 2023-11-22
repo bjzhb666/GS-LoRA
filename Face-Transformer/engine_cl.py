@@ -147,7 +147,8 @@ def evaluate(model:torch.nn.Module,
              highest_H_mean:float,
              cfg:dict,
              optimizer:torch.optim.Optimizer,
-             task_i:str):
+             task_i:str,
+             testloader_open:torch.utils.data.DataLoader=None):
     model.eval()
     for params in optimizer.param_groups:
         lr = params['lr']
@@ -159,7 +160,8 @@ def evaluate(model:torch.nn.Module,
     # 遍历测试集
     forget_acc = eval_data(model, testloader_forget, device, 'forget-{}'.format(task_i), batch)
     remain_acc = eval_data(model, testloader_remain, device, 'remain-{}'.format(task_i), batch)
-
+    if testloader_open is not None:
+        open_acc = eval_data(model, testloader_open, device, 'open-{}'.format(task_i), batch)
     forget_drop = forget_acc_before - forget_acc
     Hmean = 2*forget_drop*remain_acc/(forget_drop+remain_acc+1e-8)
 
@@ -330,6 +332,7 @@ def train_one_epoch_regularzation(
     forget_acc_before: float,
     highest_H_mean: float,
     cfg: dict,
+    testloader_open: torch.utils.data.DataLoader = None,
 ):
     model.train()
     criterion.train()
@@ -386,7 +389,8 @@ def train_one_epoch_regularzation(
         if ((batch+1)%VER_FREQ==0) and batch!=0:
             highest_H_mean=evaluate(model, testloader_forget=testloader_forget,testloader_remain=testloader_remain,
                                     device=device, batch=batch, epoch=epoch, task_i=task_i,
-                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer)
+                        forget_acc_before=forget_acc_before, highest_H_mean=highest_H_mean, cfg=cfg, optimizer=optimizer,
+                        testloader_open=testloader_open)
             model.train()
 
         batch+=1

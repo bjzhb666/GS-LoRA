@@ -88,7 +88,8 @@ def get_config(args):
     
     # parameter for SCRUB
     configuration['lr_decay_rate'] = 0.1
-    configuration['lr_decay_epochs'] = args.scrub_decay_epoch
+    if hasattr(args, 'scrub_decay_epoch'):
+        configuration['lr_decay_epochs'] = args.scrub_decay_epoch
     configuration['sgda_learning_rate'] = args.lr
 
     return configuration
