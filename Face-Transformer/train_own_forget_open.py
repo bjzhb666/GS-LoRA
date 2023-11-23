@@ -217,6 +217,7 @@ if __name__ == '__main__':
     parser.add_argument('--online', default=False, action='store_true', help='whether to use online')
     parser.add_argument('--replay', default=False, action='store_true', help='whether to use replay')
     parser.add_argument('--retrain', default=False, action='store_true', help='whether to retrain')
+    parser.add_argument('--n_fisher_sample', default=None, type=int, help='number of fisher sample')
     # wramup for alpha
     parser.add_argument('--warmup_alpha', default=False, action='store_true', help='whether to use warmup_alpha')
     parser.add_argument('--big_alpha', default=0, type=float, help='big alpha for warmup_alpha')
@@ -674,7 +675,8 @@ if __name__ == '__main__':
                 testloader_remain=testloader_remain,
                 highest_H_mean=highest_H_mean,
                 forget_acc_before=forget_acc_before,
-                cfg=cfg,)
+                cfg=cfg,
+                testloader_open=testloader_open)
         
     else: # CL baselines
         BACKBONE.train()
