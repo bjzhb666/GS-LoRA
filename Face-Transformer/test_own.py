@@ -40,7 +40,8 @@ def main(args):
             mlp_dim=2048,
             dropout=0.1,
             emb_dropout=0.1,
-            lora_rank=args.lora_rank
+            lora_rank=args.lora_rank,
+            lora_pos=args.lora_pos
         )
     elif args.network == 'VITs':
         model = ViTs_face(
@@ -111,6 +112,12 @@ def parse_arguments(argv):
                         help='training set directory')
     parser.add_argument('--batch_size', type=int, help='', default=20)
     parser.add_argument('--lora_rank', type=int, help='', default=0)
+     # lora pos (FFN and attention) on Transformer blocks
+    parser.add_argument(
+        '--lora_pos',
+        type=str,
+        default='FFN',
+        help='lora pos (FFN and attention) on Transformer blocks (default: FFN)')
     parser.add_argument('--depth', type=int, help='', default=6)
     parser.add_argument('--num_workers', type=int, help='', default=4)
     parser.add_argument("-w",

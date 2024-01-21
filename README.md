@@ -43,10 +43,9 @@ See details in the bash
 
 ## Baselines
 
-In `run_cl_forget.sh`, LIRF、SCRUB、EWC、MAS、L2、Retrain and GS-LoRA (Main Table)
+In `run_cl_forget.sh`, LIRF、SCRUB、EWC、MAS、L2、Retrain and GS-LoRA (**Main Table**)
 
 In `run_forget.sh`, some exploration Experiment like the data ratio, group strategy, scalablity
-
 
 ## Exploration Experiment
 

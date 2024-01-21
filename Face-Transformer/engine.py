@@ -70,7 +70,7 @@ def train_one_epoch(model:torch.nn.Module,
         if epoch < cfg['ALPHA_EPOCH']:
             structure_loss = torch.tensor(0.0).to(device)
         else:
-            structure_loss = get_structure_loss(model, num_layers=cfg['NUM_LAYERS'], group_type=cfg['GROUP_TYPE'])
+            structure_loss = get_structure_loss(model, num_layers=cfg['NUM_LAYERS'], group_type=cfg['GROUP_TYPE'], group_pos=cfg['GROUP_POS'])
         losses_structure.update(alpha*structure_loss.data.item(), inputs_remain.size(0))
         # compute regularization loss
 
@@ -228,7 +228,7 @@ def eval_data(model:torch.nn.Module,
     return accuracy
 
 
-def get_structure_loss(model:torch.nn.Module, num_layers:int, group_type:str='block'):
+def get_structure_loss(model:torch.nn.Module, num_layers:int, group_type:str='block', group_pos:str='FFN'):
     '''
     Get the structure loss of the model
     :param model: model (is already without ddp)
@@ -272,47 +272,56 @@ def get_structure_loss(model:torch.nn.Module, num_layers:int, group_type:str='bl
     transformer.layers.5.1.fn.fn.net.3.lora_A
     transformer.layers.5.1.fn.fn.net.3.lora_B
     '''
-    if group_type == 'block':
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
-            group_layers.append(group_item)
-    elif group_type == 'lora':
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
-            group_layers.append(group_item)
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
-            group_layers.append(group_item)
-    elif group_type == 'matrix':
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
-            group_layers.append(group_item)
-        
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
-            group_layers.append(group_item)
-        
-        for i in range(num_layers):
-            group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
-            group_layers.append(group_item)
+    if group_pos == 'FFN':
+        if group_type == 'block':
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+                group_layers.append(group_item)
+        elif group_type == 'lora':
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+                group_layers.append(group_item)
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+                group_layers.append(group_item)
+        elif group_type == 'matrix':
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_A'.format(i))
+                group_layers.append(group_item)
+            
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.0.lora_B'.format(i))
+                group_layers.append(group_item)
+            
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_A'.format(i))
+                group_layers.append(group_item)
 
+            for i in range(num_layers):
+                group_item = []
+                group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+                group_layers.append(group_item)
+        else:
+            raise ValueError('group_type should be block or lora or matrix')
+    elif group_pos == 'Attention':
         for i in range(num_layers):
             group_item = []
-            group_item.append('transformer.layers.{}.1.fn.fn.net.3.lora_B'.format(i))
+            group_item.append('transformer.layers.{}.0.fn.fn.to_qkv.lora_A'.format(i))
+            group_item.append('transformer.layers.{}.0.fn.fn.to_qkv.lora_B'.format(i))
             group_layers.append(group_item)
     else:
-        raise ValueError('group_type should be block or lora or matrix')
+        print('Wrong lora_pos')
     # get the parameters
     group_params = []
     for group_item in group_layers:

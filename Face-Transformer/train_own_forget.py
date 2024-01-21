@@ -182,6 +182,12 @@ if __name__ == '__main__':
         default=8,
         metavar='N',
         help='lora rank on FFN of Transformer blocks (default: 8)')
+    # lora pos (FFN and attention) on Transformer blocks
+    parser.add_argument(
+        '--lora_pos',
+        type=str,
+        default='FFN',
+        help='lora pos (FFN and attention) on Transformer blocks (default: FFN)')
     # wandb offline
     parser.add_argument(
         '--wandb_offline',
@@ -379,7 +385,8 @@ if __name__ == '__main__':
                  mlp_dim=2048,
                  dropout=0.1,
                  emb_dropout=0.1,
-                 lora_rank=args.lora_rank),
+                 lora_rank=args.lora_rank,
+                 lora_pos=args.lora_pos),
         'VITs':
         ViTs_face(loss_type=HEAD_NAME,
                   GPU_ID=GPU_ID,
@@ -438,7 +445,8 @@ if __name__ == '__main__':
 
     if args.lora_rank > 0:
         lora.mark_only_lora_as_trainable(BACKBONE)
-        print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
+        if args.lora_pos == 'FFN':
+            print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
         # for n,p in BACKBONE.named_parameters():
         #     if 'loss.weight' in n: # 打开梯度
         #         p.requires_grad = True
@@ -530,7 +538,7 @@ if __name__ == '__main__':
             alpha=args.alpha)
         # print(batch)
     # calculate norm list
-    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth, group_type=args.grouping)
+    norm_list = get_norm_of_lora(model_without_ddp, type='L2', group_num=args.vit_depth, group_type=args.grouping, group_pos=args.lora_pos)
     wandb.log({"norm_list": norm_list})
     # TODO: 
     wandb.run.name = 'remain-'+str(args.num_of_first_cls)+'-forget-'+str(args.per_forget_cls) \

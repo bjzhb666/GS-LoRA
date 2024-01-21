@@ -285,13 +285,15 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0.):
+    def __init__(self, dim, heads = 8, dim_head = 64, dropout = 0., lora_rank=8):
         super().__init__()
         inner_dim = dim_head *  heads
         self.heads = heads
         self.scale = dim ** -0.5
 
-        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        # self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_qkv = lora.MergedLinear(in_features=dim, out_features=inner_dim * 3, r=lora_rank, 
+                                        enable_lora=[True, True, True], bias=False)
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
             nn.Dropout(dropout)
@@ -321,13 +323,13 @@ class Attention(nn.Module):
         return out
 
 class Transformer(nn.Module):
-    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=False):
+    def __init__(self, dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=False, lora_pos:str='FFN'):
         super().__init__()
         self.layers = nn.ModuleList([])
         for _ in range(depth):
             self.layers.append(nn.ModuleList([
-                Residual(PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout))),
-                Residual(PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout, lora_rank=lora_rank)))
+                Residual(PreNorm(dim, Attention(dim, heads = heads, dim_head = dim_head, dropout = dropout, lora_rank=lora_rank if lora_pos=='Attention' else 0))),
+                Residual(PreNorm(dim, FeedForward(dim, mlp_dim, dropout = dropout, lora_rank=lora_rank if lora_pos=='FFN' else 0)))
             ]))
         
         self.up = up
@@ -349,7 +351,7 @@ class Transformer(nn.Module):
 
 
 class ViT_face(nn.Module):
-    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8):
+    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8, lora_pos:str='FFN'):
         super().__init__()
         assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
         num_patches = (image_size // patch_size) ** 2
@@ -364,7 +366,7 @@ class ViT_face(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, lora_pos=lora_pos)
 
         self.pool = pool
         self.to_latent = nn.Identity()
@@ -417,7 +419,7 @@ class ViT_face_low(nn.Module):
     '''
     ViT_face_low: 用于前半部分的特征提取，返回depth//2层的特征
     '''
-    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8):
+    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8, lora_pos:str='FFN'):
         super().__init__()
         assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
         num_patches = (image_size // patch_size) ** 2
@@ -432,7 +434,7 @@ class ViT_face_low(nn.Module):
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
         self.dropout = nn.Dropout(emb_dropout)
 
-        self.transformer = Transformer(dim, depth//2, heads, dim_head, mlp_dim, dropout, lora_rank)
+        self.transformer = Transformer(dim, depth//2, heads, dim_head, mlp_dim, dropout, lora_rank, lora_pos=lora_pos)
         # self.transformer_up = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=True)
         
         self.pool = pool
@@ -490,7 +492,7 @@ class ViT_face_up(nn.Module):
     '''
     ViT_face_up: 用于后半部分的特征提取，返回最终的特征
     '''
-    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8):
+    def __init__(self, *, loss_type, GPU_ID, num_class, image_size, patch_size, dim, depth, heads, mlp_dim, pool = 'cls', channels = 3, dim_head = 64, dropout = 0., emb_dropout = 0., lora_rank=8, lora_pos:str='FFN'):
         super().__init__()
         assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
         num_patches = (image_size // patch_size) ** 2
@@ -506,7 +508,7 @@ class ViT_face_up(nn.Module):
         self.dropout = nn.Dropout(emb_dropout)
 
         # self.transformer_low = Transformer(dim, depth//2, heads, dim_head, mlp_dim, dropout, lora_rank)
-        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=True)
+        self.transformer = Transformer(dim, depth, heads, dim_head, mlp_dim, dropout, lora_rank, up=True, lora_pos=lora_pos)
         
         self.pool = pool
         self.to_latent = nn.Identity()

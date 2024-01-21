@@ -100,6 +100,12 @@ if __name__ == '__main__':
         default=8,
         metavar='N',
         help='lora rank on FFN of Transformer blocks (default: 8)')
+    # lora pos (FFN and attention) on Transformer blocks
+    parser.add_argument(
+        '--lora_pos',
+        type=str,
+        default='FFN',
+        help='lora pos (FFN and attention) on Transformer blocks (default: FFN)')
     # wandb offline
     parser.add_argument(
         '--wandb_offline',
@@ -184,7 +190,8 @@ if __name__ == '__main__':
                          mlp_dim=2048,
                          dropout=0.1,
                          emb_dropout=0.1,
-                         lora_rank=args.lora_rank
+                         lora_rank=args.lora_rank,
+                         lora_pos=args.lora_pos
                      ),
                      'VITs': ViTs_face(
                          loss_type=HEAD_NAME,

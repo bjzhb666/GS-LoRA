@@ -92,4 +92,8 @@ def get_config(args):
         configuration['lr_decay_epochs'] = args.scrub_decay_epoch
     configuration['sgda_learning_rate'] = args.lr
 
+    # lora pos
+    if hasattr(args,'lora_pos'):
+        configuration['GROUP_POS'] = args.lora_pos
+    
     return configuration
