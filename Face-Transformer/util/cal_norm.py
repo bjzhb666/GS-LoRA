@@ -59,7 +59,7 @@ def get_norm_of_lora(model, type='L2', group_num=6, group_type:str='block', grou
         elif group_pos == 'Attention':
             for i in range(group_num):
                 group_item = []
-                group_item.append('transformer.layers.{}.0.fn.fn.to_kqv.lora_A'.format(i))
+                group_item.append('transformer.layers.{}.0.fn.fn.to_qkv.lora_A'.format(i))
                 group_item.append('transformer.layers.{}.0.fn.fn.to_qkv.lora_B'.format(i))
                 group_layers.append(group_item)
         
