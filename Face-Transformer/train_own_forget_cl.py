@@ -23,6 +23,8 @@ import loralib as lora
 from engine_cl import train_one_epoch, eval_data, train_one_epoch_regularzation
 from torch.utils.data import Subset
 from LIRFtrain import train_one_epoch_LIRF, eval_data_LIRF
+from Lwftrain import train_one_epoch_Lwf
+from DERtrain import train_one_epoch_DER
 
 from SCRUBtrain import train_one_superepoch_SCRUB
 from IPython import embed
@@ -254,6 +256,16 @@ if __name__ == '__main__':
     parser.add_argument('--kd_T', default=2.0, type=float, help='temperature for kd loss')
     parser.add_argument('--scrub_decay_epoch', default=100, type=int, help='decay epoch for sgda')
     # parser.add_argument('--scrub_decay_rate', default=3, type=int, help='warmup epoch for sgda')
+    # Lwf method
+    parser.add_argument('--Lwf',default=False, action='store_true', help='whether to use Lwf')
+    parser.add_argument('--Lwf_T',default=2, type=float, help='temperature for Lwf')
+    parser.add_argument('--Lwf_lambda_kd',default=0.5, type=float, help='lambda kd for Lwf')
+    parser.add_argument('--Lwf_lambda_remain',default=1, type=float, help='lambda remain for Lwf')
+    # DER method
+    parser.add_argument('--Der',default=False, action='store_true', help='whether to use DER')
+    parser.add_argument('--DER_lambda',default=0.1, type=float, help='lambda for DER')
+    parser.add_argument('--DER_plus',default=False, action='store_true', help='whether to use DER_plus')
+    parser.add_argument('--DER_plus_lambda',default=0.1, type=float, help='lambda for DER_plus')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
@@ -482,7 +494,7 @@ if __name__ == '__main__':
         
         deposit_model_low.train()
 
-    else: # CL baselines and SCRUB
+    else: # CL baselines(EWC, MAS, L2, Lwf, DER, DER++) and SCRUB
         for n,p in BACKBONE.named_parameters():
             if 'loss' in n and not args.ffn_open: # 最后一层关闭梯度
                 p.requires_grad = False
@@ -507,6 +519,21 @@ if __name__ == '__main__':
             swa_model = torch.optim.swa_utils.AveragedModel(BACKBONE, avg_fn=avg_fn)
             swa_model = swa_model.to(DEVICE)
 
+        if args.Lwf:
+            teacher_model = copy.deepcopy(BACKBONE)
+            teacher_model = teacher_model.to(DEVICE)
+            teacher_model.eval()
+            # freeze teacher model
+            for n,p in teacher_model.named_parameters():
+                p.requires_grad = False
+
+        if args.Der:
+            teacher_model = copy.deepcopy(BACKBONE)
+            teacher_model = teacher_model.to(DEVICE)
+            teacher_model.eval()
+            # freeze teacher model
+            for n,p in teacher_model.named_parameters():
+                p.requires_grad = False
 
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
@@ -713,7 +740,15 @@ if __name__ == '__main__':
                                     lr=args.sgda_learning_rate,
                                     momentum=args.sgda_momentum,
                                     weight_decay=args.sgda_weight_decay)
-                
+        elif args.Lwf:
+            losses_CE = AverageMeter()
+            losses_kd = AverageMeter()
+            losses_total = AverageMeter()
+            losses_remain = AverageMeter()   
+        elif args.Der:
+            losses_CE = AverageMeter()
+            losses_der = AverageMeter()
+            losses_total = AverageMeter()
         else: # CL baselines
             losses_CE = AverageMeter()
             losses_reg = AverageMeter()
@@ -891,6 +926,55 @@ if __name__ == '__main__':
                         kd_T=args.kd_T, sgda_smoothing=args.sgda_smoothing, sgda_gamma=args.sgda_gamma,
                         sgda_alpha=args.sgda_alpha
                 )   
+        elif args.Lwf:
+            losses_CE.reset()
+            losses_kd.reset()
+            losses_total.reset()
+            losses_remain.reset()
+
+            BACKBONE.train()
+            teacher_model.eval()
+
+            print("start Lwf training...")
+            epoch = 0
+            for epoch in range(NUM_EPOCH):
+                lr_scheduler.step(epoch)
+                batch, highest_H_mean, losses_CE, losses_kd, losses_remain, losses_total = train_one_epoch_Lwf(
+                       student_model=BACKBONE, teacher_model=teacher_model, 
+                       data_loader_cl_forget = train_loader_forget,
+                       remain_loader =  train_loader_remain,
+                       criterion=LOSS, optimizer=OPTIMIZER, device=DEVICE,
+                       epoch=epoch, batch=batch,
+                       losses_CE=losses_CE, losses_total=losses_total, losses_KD=losses_kd,
+                       losses_remain=losses_remain,
+                       task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
+                          highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
+                          lambda_kd=args.Lwf_lambda_kd, lambda_remain=args.Lwf_lambda_remain, temperature=args.Lwf_T
+                )
+        elif args.Der:
+            losses_CE.reset()
+            losses_der.reset()
+            losses_total.reset()
+
+            BACKBONE.train()
+            teacher_model.eval()
+
+            print("start DER training...")
+            print("DER ++ is ", args.DER_plus)
+            epoch = 0
+
+            for epoch in range(NUM_EPOCH):
+                lr_scheduler.step(epoch)
+                batch, highest_H_mean, losses_CE, losses_total, losses_der = train_one_epoch_DER(
+                    student_model=BACKBONE, teacher_model=teacher_model,
+                    data_loader_cl_forget=train_loader_forget,
+                    remain_loader=train_loader_remain,
+                    criterion=LOSS, optimizer=OPTIMIZER, device=DEVICE,
+                    epoch=epoch, batch=batch,
+                    losses_CE=losses_CE, losses_total=losses_total, losses_DER=losses_der,
+                    task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
+                    highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
+                    lambda_der=args.DER_lambda, plus=args.DER_plus, lambda_der_plus=args.DER_plus_lambda)
                 
         else: # CL baselines
             BACKBONE.train()
@@ -1129,3 +1213,7 @@ if __name__ == '__main__':
         wandb.run.name = 'LIRF' + wandb.run.name
     elif args.SCRUB:
         wandb.run.name = 'SCRUB' +str(args.sgda_smoothing)+ wandb.run.name 
+    elif args.Lwf:
+        wandb.run.name = 'Lwf' + wandb.run.name
+    elif args.Der:
+        wandb.run.name = 'DER' +str(args.DER_plus) + str(args.DER_lambda) + wandb.run.name
