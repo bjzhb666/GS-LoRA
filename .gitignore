@@ -9,6 +9,7 @@ Face-Transformer/test-Tsne/
 # other repo
 CVPR19_Incremental_Learning/
 InfluenceCL/
+incremental_learning.pytorch/
 *.pdf
 *.png
 *.npy

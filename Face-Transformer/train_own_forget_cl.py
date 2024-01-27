@@ -25,7 +25,7 @@ from torch.utils.data import Subset
 from LIRFtrain import train_one_epoch_LIRF, eval_data_LIRF
 from Lwftrain import train_one_epoch_Lwf
 from DERtrain import train_one_epoch_DER
-
+from FDRtrain import train_one_epoch_FDR
 from SCRUBtrain import train_one_superepoch_SCRUB
 from IPython import embed
 
@@ -266,6 +266,9 @@ if __name__ == '__main__':
     parser.add_argument('--DER_lambda',default=0.1, type=float, help='lambda for DER')
     parser.add_argument('--DER_plus',default=False, action='store_true', help='whether to use DER_plus')
     parser.add_argument('--DER_plus_lambda',default=0.1, type=float, help='lambda for DER_plus')
+    # FDR method
+    parser.add_argument('--FDR',default=False, action='store_true', help='whether to use FDR')
+    parser.add_argument('--FDR_lambda',default=0.1, type=float, help='lambda for FDR')
     # CL args
     parser.add_argument('--num_tasks', default=9, type=int, help='number of tasks')
     parser.add_argument('--cl_beta_list', nargs='*', default=[], type=float)
@@ -494,7 +497,7 @@ if __name__ == '__main__':
         
         deposit_model_low.train()
 
-    else: # CL baselines(EWC, MAS, L2, Lwf, DER, DER++) and SCRUB
+    else: # CL baselines(EWC, MAS, L2, Lwf, DER, DER++, FDR) and SCRUB
         for n,p in BACKBONE.named_parameters():
             if 'loss' in n and not args.ffn_open: # 最后一层关闭梯度
                 p.requires_grad = False
@@ -528,6 +531,14 @@ if __name__ == '__main__':
                 p.requires_grad = False
 
         if args.Der:
+            teacher_model = copy.deepcopy(BACKBONE)
+            teacher_model = teacher_model.to(DEVICE)
+            teacher_model.eval()
+            # freeze teacher model
+            for n,p in teacher_model.named_parameters():
+                p.requires_grad = False
+        
+        if args.FDR:
             teacher_model = copy.deepcopy(BACKBONE)
             teacher_model = teacher_model.to(DEVICE)
             teacher_model.eval()
@@ -749,6 +760,10 @@ if __name__ == '__main__':
             losses_CE = AverageMeter()
             losses_der = AverageMeter()
             losses_total = AverageMeter()
+        elif args.FDR:
+            losses_CE = AverageMeter()
+            losses_FDR = AverageMeter()
+            losses_total = AverageMeter()
         else: # CL baselines
             losses_CE = AverageMeter()
             losses_reg = AverageMeter()
@@ -926,6 +941,7 @@ if __name__ == '__main__':
                         kd_T=args.kd_T, sgda_smoothing=args.sgda_smoothing, sgda_gamma=args.sgda_gamma,
                         sgda_alpha=args.sgda_alpha
                 )   
+        
         elif args.Lwf:
             losses_CE.reset()
             losses_kd.reset()
@@ -951,6 +967,7 @@ if __name__ == '__main__':
                           highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
                           lambda_kd=args.Lwf_lambda_kd, lambda_remain=args.Lwf_lambda_remain, temperature=args.Lwf_T
                 )
+        
         elif args.Der:
             losses_CE.reset()
             losses_der.reset()
@@ -975,7 +992,30 @@ if __name__ == '__main__':
                     task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
                     highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
                     lambda_der=args.DER_lambda, plus=args.DER_plus, lambda_der_plus=args.DER_plus_lambda)
-                
+
+        elif args.FDR:
+            losses_CE.reset()
+            losses_FDR.reset()
+            losses_total.reset()
+
+            BACKBONE.train()
+            teacher_model.eval()
+
+            print("start FDR training...")
+            epoch = 0
+            for epoch in range(NUM_EPOCH):
+                lr_scheduler.step(epoch)
+                batch, highest_H_mean, losses_CE, losses_FDR, losses_total = train_one_epoch_FDR(
+                    student_model=BACKBONE, teacher_model=teacher_model,
+                    data_loader_cl_forget=train_loader_forget,
+                    remain_loader=train_loader_remain,
+                    criterion=LOSS, optimizer=OPTIMIZER, device=DEVICE,
+                    epoch=epoch, batch=batch,
+                    losses_CE=losses_CE, losses_total=losses_total, losses_FDR=losses_FDR,
+                    task_i=task_i, testloader_forget=testloader_forget, testloader_remain=testloader_remain,
+                    highest_H_mean=highest_H_mean, forget_acc_before=forget_acc_before, cfg=cfg,
+                    reg_lambda=args.FDR_lambda)
+
         else: # CL baselines
             BACKBONE.train()
 
