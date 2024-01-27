@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=6
 NUM_FIRST_CLS=80
 PER_FORGET_CLS=$((100-$NUM_FIRST_CLS))
 # lr=1e-2 # 1e-4?
@@ -213,21 +213,21 @@ python3 -u train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
     --warmup-epochs 0 --lr $lr --num_workers 8  --lora_rank 0 --decay-epochs 100 \
     --vit_depth 6 --num_of_first_cls $NUM_FIRST_CLS --per_forget_cls $PER_FORGET_CLS \
     -r /data/zhaohongbo/Github/amnesic-face-recognition/Face-Transformer/results/ViT-P8S8_casia100_cosface_s1-1200-150de-depth6-new/Backbone_VIT_Epoch_1110_Batch_82100_Time_2023-10-18-18-22_checkpoint.pth \
-    --BND 110 --min-lr 1e-5 --num_tasks 4 --one_stage --Der --DER_lambda 0.001 --replay --wandb_group rebuttal_forget_clbaseline
+    --BND 110 --min-lr 1e-5 --num_tasks 4 --one_stage --Der --DER_lambda 0.01 --replay --wandb_group rebuttal_forget_clbaseline
 done
 done
 
-# DER++
-for lr in 1e-3
-do
-for beta in 0.1
-do
-python3 -u train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
-    -head CosFace --outdir /data1/zhaohongbo/exps/forget-CL/CL-baseline/DER0.1-start${NUM_FIRST_CLS}forget${PER_FORGET_CLS}lr${lr} \
-    --warmup-epochs 0 --lr $lr --num_workers 8  --lora_rank 0 --decay-epochs 100 \
-    --vit_depth 6 --num_of_first_cls $NUM_FIRST_CLS --per_forget_cls $PER_FORGET_CLS \
-    -r /data/zhaohongbo/Github/amnesic-face-recognition/Face-Transformer/results/ViT-P8S8_casia100_cosface_s1-1200-150de-depth6-new/Backbone_VIT_Epoch_1110_Batch_82100_Time_2023-10-18-18-22_checkpoint.pth \
-    --BND 110 --min-lr 1e-5 --num_tasks 4 --one_stage --Der --DER_lambda 0.001 --replay --wandb_group rebuttal_forget_clbaseline \
-    --DER_plus --DER_plus_lambda 0.001
-done
-done
+# # DER++
+# for lr in 1e-3
+# do
+# for beta in 0.1
+# do
+# python3 -u train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
+#     -head CosFace --outdir /data1/zhaohongbo/exps/forget-CL/CL-baseline/DER0.1-start${NUM_FIRST_CLS}forget${PER_FORGET_CLS}lr${lr} \
+#     --warmup-epochs 0 --lr $lr --num_workers 8  --lora_rank 0 --decay-epochs 100 \
+#     --vit_depth 6 --num_of_first_cls $NUM_FIRST_CLS --per_forget_cls $PER_FORGET_CLS \
+#     -r /data/zhaohongbo/Github/amnesic-face-recognition/Face-Transformer/results/ViT-P8S8_casia100_cosface_s1-1200-150de-depth6-new/Backbone_VIT_Epoch_1110_Batch_82100_Time_2023-10-18-18-22_checkpoint.pth \
+#     --BND 110 --min-lr 1e-5 --num_tasks 4 --one_stage --Der --DER_lambda 0.001 --replay --wandb_group rebuttal_forget_clbaseline \
+#     --DER_plus --DER_plus_lambda 1
+# done
+# done

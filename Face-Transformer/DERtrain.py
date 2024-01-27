@@ -99,5 +99,7 @@ def train_one_epoch_DER(student_model:torch.nn.Module, teacher_model:torch.nn.Mo
 
         # prefetcher next batch
         inputs_remain, labels_remain = prefetcher_remain.next()
-
+        if inputs_remain is None:
+            prefetcher_remain = data_prefetcher(remain_loader, device=device, prefetch=True)
+            inputs_remain, labels_remain = prefetcher_remain.next()	
     return batch, highest_H_mean, losses_CE, losses_DER, losses_total
