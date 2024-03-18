@@ -8,7 +8,10 @@ Face-Transformer/wandb/
 Face-Transformer/test-Tsne/
 Face-Transformer/Tsne/
 Face-Transformer/draw/
-Face-Transformer/get_lwf_val_data_pair.py
+Face-Transformer/get_lfw_val_data_pair.py
+Face-Transformer/tsne_main.py
+Face-Transformer/test.ipynb
+Face-Transformer/log/
 # other repo
 CVPR19_Incremental_Learning/
 InfluenceCL/

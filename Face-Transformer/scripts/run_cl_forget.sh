@@ -222,7 +222,7 @@ for lr in 1e-3
 do
 for beta in 0.1
 do
-python3 -u train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
+python3 -u train/train_own_forget_cl.py -b 48 -w 0 -d casia100 -n VIT -e 100 \
     -head CosFace --outdir /hdddata/zhaohongbo/exps/forget-CL/CL-baseline/DER++0.5-start${NUM_FIRST_CLS}forget${PER_FORGET_CLS}lr${lr} \
     --warmup-epochs 0 --lr $lr --num_workers 8  --lora_rank 0 --decay-epochs 100 \
     --vit_depth 6 --num_of_first_cls $NUM_FIRST_CLS --per_forget_cls $PER_FORGET_CLS \
