@@ -6,6 +6,9 @@ Face-Transformer/Fresults/
 Face-Transformer/__pycache__/
 Face-Transformer/wandb/
 Face-Transformer/test-Tsne/
+Face-Transformer/Tsne/
+Face-Transformer/draw/
+Face-Transformer/get_lwf_val_data_pair.py
 # other repo
 CVPR19_Incremental_Learning/
 InfluenceCL/
@@ -14,3 +17,5 @@ incremental_learning.pytorch/
 *.png
 *.npy
 *.pth
+*.txt
+!requirements.txt

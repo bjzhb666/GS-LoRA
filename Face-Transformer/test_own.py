@@ -62,7 +62,7 @@ def main(args):
         )
 
     model_root = args.model
-    model.load_state_dict(torch.load(model_root))
+    model.load_state_dict(torch.load(model_root), strict=False)
 
     w = torch.load(model_root)
     for x in w.keys():
@@ -100,9 +100,36 @@ def main(args):
     # 打印测试精度
     accuracy = 100 * correct / total
     print('\n')
-    print('Test Accuracy: {:.2f}%'.format(accuracy))
+    print('{:.4f}%'.format(accuracy))
     print('\n')
     # wandb.log({"Test Accuracy": accuracy})
+
+    # 测试每一类的准确率
+    class_correct = list(0. for i in range(NUM_CLASS))
+    class_total = list(0. for i in range(NUM_CLASS))
+    with torch.no_grad():
+        for images, labels in testloader:
+            images = images.to(DEVICE)
+            labels = labels.to(DEVICE).long()
+            outputs, _ = model(images, labels)  # 假设model是你的模型
+            _, predicted = torch.max(outputs, 1)
+            c = (predicted == labels).squeeze()
+            for i in range(args.batch_size):
+                label = labels[i]
+                class_correct[label] += c[i].item()
+                class_total[label] += 1
+    # 打印每一类的测试精度
+    for i in range(NUM_CLASS):
+        print('Accuracy of %5s : %4.4f %%' % (i, 100 * class_correct[i] / class_total[i]))
+    # wandb.log({"Accuracy of %5s : %2d %%": 100 * class_correct[i] / class_total[i]})
+    print('\n')
+
+    # 保存每一类的测试精度
+    with open('class_accuracy40.txt', 'w') as f:
+        for i in range(NUM_CLASS):
+            f.write('%4.4f %%' % (100 * class_correct[i] / class_total[i]))
+            f.write('\n')
+    # wandb.save('class_accuracy.txt')
 
 
 def parse_arguments(argv):

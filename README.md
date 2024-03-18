@@ -1,6 +1,7 @@
-# GS-LoRA for Face Transformer
 
-All the code is in Face-Transformer folder.
+# Continual Forgetting for Pre-trained Vision Models (CVPR2024)
+
+This is the official implementation of ***GS-LoRA*** (CVPR 2024). GS-LoRA is effective, parameter-efficient, data-efficient, and easy to implement continual forgetting, where selective information is expected to be *continuously* removed from a pre-trained model while maintaining the rest. The core idea is to use LoRA combining *group* *Lasso* to realize fast model editing. For more details, please refer to:
 
 ## Pretrain a Face Transformer
 

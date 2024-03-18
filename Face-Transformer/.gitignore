@@ -3,4 +3,4 @@ eval/
 results/
 __pycache__/
 wandb/
-```
+*.txt

@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=6
 NUM_FIRST_CLS=90
 PER_FORGET_CLS=$((100-$NUM_FIRST_CLS))
 # PER_FORGET_CLS=10
@@ -7,7 +7,7 @@ lr=1e-3 # 1e-4?
 RATIO=0.1
 for lr in 1e-2
 do
-for beta in 0.01 0.05 0.1
+for beta in 20
 do
 for alpha in 0.005
 do
