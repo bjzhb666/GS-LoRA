@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 # encoding: utf-8
-'''
+"""
 @author: yaoyaozhong
 @contact: zhongyaoyao@bupt.edu.cn
 @file: image_iter_yy.py
 @time: 2020/06/03
 @desc: training dataset loader for .rec
-'''
+"""
 
 import torchvision.transforms as transforms
 import torch.utils.data as data
@@ -36,22 +36,20 @@ class FaceDataset(data.Dataset):
         self.rand_mirror = rand_mirror
         assert path_imgrec
         if path_imgrec:
-            logging.info('loading recordio %s...', path_imgrec)
+            logging.info("loading recordio %s...", path_imgrec)
             path_imgidx = path_imgrec[0:-4] + ".idx"
             print(path_imgrec, path_imgidx)
-            self.imgrec = recordio.MXIndexedRecordIO(path_imgidx, path_imgrec,
-                                                     'r')
+            self.imgrec = recordio.MXIndexedRecordIO(path_imgidx, path_imgrec, "r")
             s = self.imgrec.read_idx(0)
             header, _ = recordio.unpack(s)
             if header.flag > 0:
-                print('header0 label', header.label)
+                print("header0 label", header.label)
                 self.header0 = (int(header.label[0]), int(header.label[1]))
                 # assert(header.flag==1)
                 # self.imgidx = range(1, int(header.label[0]))
                 self.imgidx = []
                 self.id2range = {}
-                self.seq_identity = range(int(header.label[0]),
-                                          int(header.label[1]))
+                self.seq_identity = range(int(header.label[0]), int(header.label[1]))
                 for identity in self.seq_identity:
                     s = self.imgrec.read_idx(identity)
                     header, _ = recordio.unpack(s)
@@ -59,7 +57,7 @@ class FaceDataset(data.Dataset):
                     count = b - a
                     self.id2range[identity] = (a, b)
                     self.imgidx += range(a, b)
-                print('id2range', len(self.id2range))
+                print("id2range", len(self.id2range))
             else:
                 self.imgidx = list(self.imgrec.keys)
             self.seq = self.imgidx
@@ -88,10 +86,11 @@ class FaceDataset(data.Dataset):
 
 
 class Wrapper10Dataset(Dataset):
-    '''
+    """
     该数据集类用于将原始数据集的样本数量减少到原来的10%
     Do not use any more
-    '''
+    """
+
     def __init__(self, dataset):
         self.dataset = dataset
         self.num_classes = self._count_classes()
@@ -140,10 +139,12 @@ class Wrapper10Dataset(Dataset):
 
         return class_samples[target_count]
 
+
 class CLDatasetWrapper(Dataset):
-    '''
+    """
     modify the label of the original dataset to make it different from the original label
-    '''
+    """
+
     def __init__(self, original_dataset):
         self.original_dataset = original_dataset
 
@@ -162,7 +163,9 @@ class CLDatasetWrapper(Dataset):
         # Modify the label to make it different from the original label
         # Randomly generate a positive integer
         random_int = random.randint(1, 100)
-        modified_label = label + random_int  # You can define your own modification rule here
+        modified_label = (
+            label + random_int
+        )  # You can define your own modification rule here
 
         # Ensure the modified label is not equal to the original label
         modified_label = modified_label % len(self.original_dataset.classes)
@@ -171,30 +174,30 @@ class CLDatasetWrapper(Dataset):
 
         return modified_label
 
+
 class CustomSubset(Subset):
-    '''A custom subset class'''
+    """A custom subset class"""
+
     def __init__(self, dataset, indices):
         super().__init__(dataset, indices)
-        self.targets = dataset.targets # 保留targets属性
-        self.classes = dataset.classes # 保留classes属性
+        self.targets = dataset.targets  # 保留targets属性
+        self.classes = dataset.classes  # 保留classes属性
 
-    def __getitem__(self, idx): #同时支持索引访问操作
-        x, y = self.dataset[self.indices[idx]]      
-        return x, y 
+    def __getitem__(self, idx):  # 同时支持索引访问操作
+        x, y = self.dataset[self.indices[idx]]
+        return x, y
 
-    def __len__(self): # 同时支持取长度操作
+    def __len__(self):  # 同时支持取长度操作
         return len(self.indices)
-    
-if __name__ == '__main__':
-    root = './data/faces_webface_112x112/train.rec'
+
+
+if __name__ == "__main__":
+    root = "./data/faces_webface_112x112/train.rec"
     embed()
     dataset = FaceDataset(path_imgrec=root, rand_mirror=False)
-    trainloader = data.DataLoader(dataset,
-                                  batch_size=32,
-                                  shuffle=True,
-                                  num_workers=2,
-                                  drop_last=False)
+    trainloader = data.DataLoader(
+        dataset, batch_size=32, shuffle=True, num_workers=2, drop_last=False
+    )
     print(len(dataset))  # 490623
     for data, label in trainloader:
-        print(data.shape,
-              label)  # torch.Size([32, 3, 112, 112]) torch.Size([32])
+        print(data.shape, label)  # torch.Size([32, 3, 112, 112]) torch.Size([32])

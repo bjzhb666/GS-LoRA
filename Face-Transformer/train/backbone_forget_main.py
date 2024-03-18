@@ -32,6 +32,9 @@ from vit_pytorch_face import ViTs_face
 from timm.scheduler import create_scheduler
 from timm.optim import create_optimizer
 import loralib as lora
+from torch.utils.data import Subset
+import numpy as np
+from engine import eval_data
 
 
 def count_trainable_parameters(model):
@@ -189,7 +192,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
+        default=8,
         metavar="N",
         help="dataloader threads (default: 4)",
     )
@@ -202,13 +205,6 @@ if __name__ == "__main__":
         metavar="N",
         help="lora rank on FFN of Transformer blocks (default: 8)",
     )
-    # lora pos (FFN and attention) on Transformer blocks
-    parser.add_argument(
-        "--lora_pos",
-        type=str,
-        default="FFN",
-        help="lora pos (FFN and attention) on Transformer blocks (default: FFN)",
-    )
     # wandb offline
     parser.add_argument(
         "--wandb_offline",
@@ -219,6 +215,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--vit_depth", type=int, default=10, metavar="N", help="vit depth (default: 20)"
     )
+    # forget and remain cls
+    parser.add_argument(
+        "--num_of_first_cls",
+        type=int,
+        default=50,
+        metavar="N",
+        help="number of first cls (default: 50)",
+    )
+    parser.add_argument(
+        "--per_forget_cls",
+        type=int,
+        default=50,
+        metavar="N",
+        help="number of forget cls (default: 50)",
+    )
+    parser.add_argument("--wandb_group", type=str, default="casia100")
+
+    parser.add_argument("--forget_data_ratio", type=float, default=0.1)
+    parser.add_argument("--remain_data_ratio", type=float, default=0.1)
     args = parser.parse_args()
 
     # ======= hyperparameters & data loaders =======#
@@ -259,11 +274,13 @@ if __name__ == "__main__":
     print(cfg)
     with open(os.path.join(WORK_PATH, "config.txt"), "w") as f:
         f.write(str(cfg))
+    with open(os.path.join(WORK_PATH, "args.txt"), "w") as f:
+        f.write(str(args))
     print("=" * 60)
 
     wandb.init(
         project="face recognition",
-        group="casia100",
+        group=args.wandb_group,
         mode="offline" if args.wandb_offline else "online",
     )
     wandb.config.update(args)
@@ -276,8 +293,6 @@ if __name__ == "__main__":
         NUM_CLASS = 100
     elif args.data_mode == "casia1000":
         NUM_CLASS = 1000
-    elif args.data_mode == "tsne":
-        NUM_CLASS = 10
     h, w = 112, 112
 
     assert h == INPUT_SIZE[0] and w == INPUT_SIZE[1]
@@ -287,32 +302,228 @@ if __name__ == "__main__":
             transforms.ToTensor(),
         ]
     )
-    # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
-    dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
-
+    order_list = [
+        83,
+        17,
+        10,
+        9,
+        89,
+        52,
+        7,
+        32,
+        37,
+        77,
+        61,
+        34,
+        78,
+        55,
+        56,
+        63,
+        69,
+        22,
+        75,
+        66,
+        35,
+        72,
+        71,
+        23,
+        86,
+        38,
+        24,
+        5,
+        29,
+        30,
+        16,
+        11,
+        82,
+        19,
+        57,
+        14,
+        91,
+        27,
+        98,
+        53,
+        0,
+        20,
+        59,
+        28,
+        47,
+        18,
+        6,
+        48,
+        12,
+        62,
+        1,
+        43,
+        3,
+        60,
+        41,
+        85,
+        4,
+        95,
+        97,
+        36,
+        94,
+        65,
+        67,
+        99,
+        25,
+        33,
+        70,
+        40,
+        92,
+        31,
+        58,
+        15,
+        45,
+        2,
+        87,
+        76,
+        80,
+        44,
+        64,
+        8,
+        51,
+        54,
+        13,
+        88,
+        84,
+        26,
+        50,
+        39,
+        96,
+        81,
+        49,
+        42,
+        21,
+        93,
+        74,
+        73,
+        46,
+        90,
+        68,
+        79,
+    ]
+    # get forget and remain dataset
+    # split datasets
+    # 1. calculate st1, en1, st2, en2
+    st1 = 0
+    en1 = args.num_of_first_cls
+    st2 = en1
+    en2 = en1 + args.per_forget_cls
+    # 2. split datasets
     train_dataset = datasets.ImageFolder(
         root=os.path.join(DATA_ROOT, "train"), transform=data_transform
     )
     test_dataset = datasets.ImageFolder(
         root=os.path.join(DATA_ROOT, "test"), transform=data_transform
     )
+    remain_dataset_train, forget_dataset_train = split_dataset(
+        dataset=train_dataset,
+        class_order_list=order_list,
+        split1_start=st1,
+        split1_end=en1,
+        split2_start=st2,
+        split2_end=en2,
+    )
+    remain_dataset_test, forget_dataset_test = split_dataset(
+        dataset=test_dataset,
+        class_order_list=order_list,
+        split1_start=st1,
+        split1_end=en1,
+        split2_start=st2,
+        split2_end=en2,
+    )
 
-    trainloader = torch.utils.data.DataLoader(
-        train_dataset,
+    # get sub datasets
+    len_forget_dataset_train = len(forget_dataset_train)
+    len_remain_dataset_train = len(remain_dataset_train)
+    subset_size_forget = int(len_forget_dataset_train * args.forget_data_ratio)
+    subset_size_remain = int(len_remain_dataset_train * args.remain_data_ratio)
+
+    subset_indices_forget = torch.randperm(len_forget_dataset_train)[
+        :subset_size_forget
+    ]
+    subset_indices_remain = torch.randperm(len_remain_dataset_train)[
+        :subset_size_remain
+    ]
+
+    forget_dataset_train_sub = Subset(forget_dataset_train, subset_indices_forget)
+    remain_dataset_train_sub = Subset(remain_dataset_train, subset_indices_remain)
+
+    combined_dataset_train = torch.utils.data.ConcatDataset(
+        [forget_dataset_train_sub, remain_dataset_train_sub]
+    )
+
+    # get dataloader
+    train_loader_forget = torch.utils.data.DataLoader(
+        forget_dataset_train_sub,
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=WORKERS,
         drop_last=False,
     )
-    testloader = torch.utils.data.DataLoader(
-        test_dataset,
+    train_loader_remain = torch.utils.data.DataLoader(
+        remain_dataset_train_sub,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=WORKERS,
+        drop_last=False,
+    )
+    testloader_forget = torch.utils.data.DataLoader(
+        forget_dataset_test,
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=WORKERS,
         drop_last=False,
     )
+    testloader_remain = torch.utils.data.DataLoader(
+        remain_dataset_test,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        num_workers=WORKERS,
+        drop_last=False,
+    )
+    combined_loader_train = torch.utils.data.DataLoader(
+        combined_dataset_train,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        num_workers=WORKERS,
+        drop_last=False,
+    )
+
+    print("len(train_loader_forget)", len(train_loader_forget))
+    print("len(train_loader_remain)", len(train_loader_remain))
+    print("len(testloader_forget)", len(testloader_forget))
+    print("len(testloader_remain)", len(testloader_remain))
+    print("len(combined_loader_train)", len(combined_loader_train))
+    # import pdb; pdb.set_trace()
+    # testloader = torch.utils.data.DataLoader(test_dataset,
+    #                                          batch_size=BATCH_SIZE,
+    #                                          shuffle=False,
+    #                                          num_workers=WORKERS,
+    #                                          drop_last=False)
 
     print("Number of Training Classes: {}".format(NUM_CLASS))
+
+    # # dataset = FaceDataset(os.path.join(DATA_ROOT, 'train.rec'), rand_mirror=True)
+    # dataset = datasets.ImageFolder(root=DATA_ROOT, transform=data_transform)
+
+    # train_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'train'),transform=data_transform)
+    # test_dataset = datasets.ImageFolder(root=os.path.join(DATA_ROOT, 'test'),transform=data_transform)
+
+    # trainloader = torch.utils.data.DataLoader(train_dataset,
+    #                                           batch_size=BATCH_SIZE,
+    #                                           shuffle=True,
+    #                                           num_workers=WORKERS,
+    #                                           drop_last=True)
+    # testloader = torch.utils.data.DataLoader(test_dataset,
+    #                                          batch_size=BATCH_SIZE,
+    #                                          shuffle=False,
+    #                                          num_workers=WORKERS,
+    #                                          drop_last=False)
+
+    # print("Number of Training Classes: {}".format(NUM_CLASS))
 
     highest_acc = 0.0
 
@@ -332,7 +543,6 @@ if __name__ == "__main__":
             dropout=0.1,
             emb_dropout=0.1,
             lora_rank=args.lora_rank,
-            lora_pos=args.lora_pos,
         ),
         "VITs": ViTs_face(
             loss_type=HEAD_NAME,
@@ -373,7 +583,7 @@ if __name__ == "__main__":
         print(BACKBONE_RESUME_ROOT)
         if os.path.isfile(BACKBONE_RESUME_ROOT):
             print("Loading Backbone Checkpoint '{}'".format(BACKBONE_RESUME_ROOT))
-            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT))
+            BACKBONE.load_state_dict(torch.load(BACKBONE_RESUME_ROOT), strict=False)
         else:
             print(
                 "No Checkpoint Found at '{}' . Please Have a Check or Continue to Train from Scratch".format(
@@ -382,11 +592,13 @@ if __name__ == "__main__":
             )
         print("=" * 60)
 
-    if args.lora_rank > 0:
-        lora.mark_only_lora_as_trainable(BACKBONE)
-        print("Use LoRA in Transformer FFN, loar_rank: ", args.lora_rank)
-    else:
-        print("Do not use LoRA in Transformer FFN, train all parameters.")  # 68631040
+    # 只训练FFN的参数
+    for name, param in BACKBONE.named_parameters():
+        if "loss" in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
+
     # 统计BACKBONE的可训练参数量
     learnable_parameters = count_trainable_parameters(BACKBONE)
     print("learnable_parameters", learnable_parameters)  # 31760896
@@ -409,8 +621,8 @@ if __name__ == "__main__":
         BACKBONE = BACKBONE.to(DEVICE)
 
     # ======= train & validation & save checkpoint =======#
-    DISP_FREQ = 10  # frequency to display training loss & acc
-    VER_FREQ = 20  # frequency to perform validation
+    DISP_FREQ = 5  # frequency to display training loss & acc
+    VER_FREQ = 5  # frequency to perform validation
 
     batch = 0  # batch index
 
@@ -418,6 +630,16 @@ if __name__ == "__main__":
     top1 = AverageMeter()
 
     BACKBONE.train()  # set to training mode
+    forget_acc = []
+    remain_acc = []
+
+    # eval before training
+    print("Perform Evaluation on forget test set and remain test set...")
+    forget_acc_before = eval_data(BACKBONE, testloader_forget, DEVICE, "forget", batch)
+    remain_acc_before = eval_data(BACKBONE, testloader_remain, DEVICE, "remain", batch)
+    wandb.log(
+        {"forget_acc_before": forget_acc_before, "remain_acc_before": remain_acc_before}
+    )
 
     for epoch in range(NUM_EPOCH):  # start training process
 
@@ -425,7 +647,7 @@ if __name__ == "__main__":
 
         last_time = time.time()
 
-        for inputs, labels in iter(trainloader):
+        for inputs, labels in iter(combined_loader_train):
 
             # compute output
             inputs = inputs.to(DEVICE)
@@ -488,13 +710,13 @@ if __name__ == "__main__":
                     break
                 print("Learning rate %f" % lr)
                 print("Perform Evaluation on test set and Save Checkpoints...")
-                acc = []
+
                 BACKBONE.eval()  # set to evaluation mode
                 # 遍历测试集
                 correct = 0
                 total = 0
                 with torch.no_grad():
-                    for images, labels in testloader:
+                    for images, labels in testloader_forget:
                         # 在这里进行测试操作
                         images = images.to(DEVICE)
                         labels = labels.to(DEVICE).long()
@@ -506,45 +728,38 @@ if __name__ == "__main__":
                         correct += (predicted == labels).sum().item()
                 # 打印测试精度
                 accuracy = 100 * correct / total
-                print("Test Accuracy: {:.2f}%".format(accuracy))
-                wandb.log({"Test Accuracy": accuracy}, step=batch + 1)
-                acc.append(accuracy)
-                # save checkpoints per epoch
+                print("Test forget Accuracy: {:.2f}%".format(accuracy))
+                wandb.log({"Test forget Accuracy": accuracy}, step=batch + 1)
+                forget_acc.append(accuracy)
 
-                if accuracy > highest_acc:
-                    highest_acc = accuracy
-                    if MULTI_GPU:
-                        torch.save(
-                            BACKBONE.module.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth".format(
-                                    BACKBONE_NAME, epoch + 1, batch + 1, get_time()
-                                ),
-                            ),
-                        )
-                    else:
-                        torch.save(
-                            BACKBONE.state_dict(),
-                            os.path.join(
-                                WORK_PATH,
-                                "Backbone_{}_Epoch_{}_Batch_{}_Time_{}_checkpoint.pth".format(
-                                    BACKBONE_NAME, epoch + 1, batch + 1, get_time()
-                                ),
-                            ),
-                        )
-                    # set the maximum checkpoint numbers to keep
-                    if len(os.listdir(WORK_PATH)) >= 6:
-                        checkpoints = list(
-                            filter(lambda f: f.endswith(".pth"), os.listdir(WORK_PATH))
-                        )
-                        checkpoints.sort(
-                            key=lambda f: os.path.getmtime(os.path.join(WORK_PATH, f))
-                        )
-                        os.remove(os.path.join(WORK_PATH, checkpoints[0]))
+                BACKBONE.eval()
+                correct = 0
+                total = 0
+                with torch.no_grad():
+                    for images, labels in testloader_remain:
+                        # 在这里进行测试操作
+                        images = images.to(DEVICE)
+                        labels = labels.to(DEVICE).long()
+
+                        outputs, _ = BACKBONE(images, labels)
+                        _, predicted = torch.max(outputs.data, 1)
+                        total += labels.size(0)
+                        correct += (predicted == labels).sum().item()
+                # 打印测试精度
+                accuracy = 100 * correct / total
+                print("Test remain Accuracy: {:.2f}%".format(accuracy))
+                wandb.log({"Test remain Accuracy": accuracy}, step=batch + 1)
+                remain_acc.append(accuracy)
+
                 BACKBONE.train()  # set to training mode
 
             batch += 1  # batch index
+
+    # save forget and remain acc
+    forget_acc = np.array(forget_acc)
+    remain_acc = np.array(remain_acc)
+    np.save(os.path.join(WORK_PATH, "forget_acc.npy"), forget_acc)
+    np.save(os.path.join(WORK_PATH, "remain_acc.npy"), remain_acc)
 
     wandb.run.name = (
         args.net
