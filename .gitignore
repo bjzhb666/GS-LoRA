@@ -18,6 +18,7 @@ InfluenceCL/
 incremental_learning.pytorch/
 *.pdf
 *.png
+!1711080678110.png
 *.npy
 *.pth
 *.txt
