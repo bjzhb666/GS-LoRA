@@ -4,7 +4,19 @@
 
 This is the official implementation of ***GS-LoRA*** (CVPR 2024). GS-LoRA is effective, parameter-efficient, data-efficient, and easy to implement continual forgetting, where selective information is expected to be *continuously* removed from a pre-trained model while maintaining the rest. The core idea is to use LoRA combining *group* *Lasso* to realize fast model editing. For more details, please refer to:
 
-[[2403.11530] Continual Forgetting for Pre-trained Vision Models (arxiv.org)](https://arxiv.org/abs/2403.11530)
+**Continual Forgetting for Pre-trained Vision Models [[paper](https://arxiv.org/abs/2403.11530)]**
+
+[‪Hongbo Zhao](https://scholar.google.com/citations?user=Gs22F0UAAAAJ&hl=zh-CN), Bolin Ni, [‪Junsong Fan‬](https://scholar.google.com/citations?user=AfK4UcUAAAAJ&hl=zh-CN&oi=sra), [‪Yuxi Wang‬](https://scholar.google.com/citations?user=waLCodcAAAAJ&hl=zh-CN&oi=sra), [‪Yuntao Chen‬](https://scholar.google.com/citations?hl=zh-CN&user=iLOoUqIAAAAJ), [‪Gaofeng Meng](https://scholar.google.com/citations?hl=zh-CN&user=5hti_r0AAAAJ), [‪Zhaoxiang Zhang‬](https://scholar.google.com/citations?hl=zh-CN&user=qxWfV6cAAAAJ)
+
+## Experimental results
+
+### Single-step Forgetting
+
+![1711267008328](image/README/1711267008328.png)
+
+### Continual Forgetting
+
+![1711267076101](image/README/1711267076101.png)
 
 ## Getting Started
 
@@ -24,68 +36,63 @@ conda create -n GSlora python=3.9
 pip install -r requirements.txt
 ```
 
-#### c. Prepare the datasets.
+#### c. Prepare the datasets
 
-You can get our CASIA-100 in [https://drive.google.com/file/d/16CaYf45UsHPff1smxkCXaHE8tZo4wTPv/view?usp=sharing](https://drive.google.com/file/d/16CaYf45UsHPff1smxkCXaHE8tZo4wTPv/view?usp=sharing)
+```bash
+mkdir data
+cd data
+unzip data.zip
+```
 
-CASIA-100 is a subdataset from  [CASIA-WebFace](https://paperswithcode.com/dataset/casia-webface).
+You can get our CASIA-100 in [https://drive.google.com/file/d/16CaYf45UsHPff1smxkCXaHE8tZo4wTPv/view?usp=sharing](https://drive.google.com/file/d/16CaYf45UsHPff1smxkCXaHE8tZo4wTPv/view?usp=sharing), and put it in the data folder.
+
+Note: CASIA-100 is a subdataset from  [CASIA-WebFace](https://paperswithcode.com/dataset/casia-webface). We have already split the train/test dataset in our google drive.
 
 ## Pretrain a Face Transformer
 
-You can use our [pre-trained Face Transformer](https://drive.google.com/file/d/1kGo2eor-AYEMruyxI6_oEOegee6VB2_D/view?usp=sharing) directly.
+```bash
+mkdir result
+cd result
+```
+
+You can use our [pre-trained Face Transformer](https://drive.google.com/file/d/1kGo2eor-AYEMruyxI6_oEOegee6VB2_D/view?usp=sharing) directly. Download the pre-trained weight and put it into the result folder
 
 **Or** you can train your own pre-trained models.
+
+Your result folder should be like this:
+
+```bash
+result
+└── ViT-P8S8_casia100_cosface_s1-1200-150de-depth6
+    ├── Backbone_VIT_Epoch_1110_Batch_82100_Time_2023-10-18-18-22_checkpoint.pth
+    └── config.txt
+```
 
 Code is in `run_sub.sh`
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7
-python3 -u train_own.py -b 960 -w 0,1,2,3,4,5,6,7 -d casia100 -n VIT -e 1200 \
--head CosFace --outdir ./results/ViT-P8S8_casia100_cosface_s1-1200-150de-depth18 \
---warmup-epochs 10 --lr 6e-4 --num_workers 8  --lora_rank 0 --decay-epochs 150 \
---vit_depth 18 --min-lr 2e-5
-# python3 -u train.py -b 80 -w 0 -d casia \
-# -n VITs -head CosFace --outdir ./results/ViT-P12S8_casia_cosface_s1 \
-# --warmup-epochs 1 --lr 5e-5  --num_workers 8 -t lfw,sllfw
-
-# python3 -u train.py -b 60 -w 0 -d casia \
-# -n VITs -head CosFace --outdir ./results/ViT-P12S8_casia_cosface_s2 \
-# --warmup-epochs 0 --lr 1.25e-5 -r path_to_model --num_workers 8 -t lfw,sllfw
-
-# python3 -u train.py -b 60 -w 0 -d cas ia \
-# -n VITs -head CosFace --outdir ./results/ViT-P12S8_casia_cosface_s3 \
-# --warmup-epochs 0 --lr 6.25e-6 -r path_to_model  --num_workers 8 -t lfw,sllfw
+bash scripts/run_sub.sh
 ```
 
-`run.sh` is the original code using all casia dataset, not casia-100
+`test_sub.sh` is the test code for our Face Transformer. You can test the pre-trained model use it.
 
-`test.sh` is the original test code
+```bash
+bash scripts/test_sub.sh
+```
 
-`test_sub.sh` is the test code for our Face Transformer
+## Continual Forgetting and Single Step Forgetting
 
-## Continual Forgetting
+### a. Continual Forgetting
 
-### Baselines
+**We provide the code of all baselines and our method GS-LoRA metioned in our paper.**
 
-In `run_cl_forget.sh`, LIRF, SCRUB, EWC, MAS, L2, DER, DER++, FDR, LwF, Retrain and GS-LoRA (**Main Table**)
+In `run_cl_forget.sh`, **LIRF, SCRUB, EWC, MAS, L2, DER, DER++, FDR, LwF, Retrain and GS-LoRA** (**Main Table**)
 
-In `run_forget.sh`, some exploration Experiment like the data ratio, group strategy, scalablity
+### b. Single-step forgetting
 
-### GS-LoRA
+For baseline methods, you can still use `run_cl_forget.sh` and change `--num_tasks` to 1. (There are examples in `run_cl_forget.sh`.)
 
-## Exploration Experiment
-
-#### a. Open vocabulary
-
-use `run_forget_open.sh`
-
-EWC、MAS、L2、Retrain and GS-LoRA/LoRA
-
-See details in the bash
-
-### b. Backbone forgetting
-
-Backbone forget folder gives the result of Sec 6.1
+**For GS-LoRA, we recommend you to use `run_forget.sh`.** Some exploration Experiment like the **data ratio, group strategy, scalablity, $\beta$ ablation** code can also be found in this script.
 
 ## Citation
 
@@ -99,6 +106,10 @@ If you find this project useful in your research, please consider citing:
   year={2024}
 }
 ```
+
+## Contact
+
+Please contact us or post an issue if you have any questions.
 
 ## Acknowledgement
 
