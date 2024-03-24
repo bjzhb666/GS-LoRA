@@ -12,7 +12,7 @@ test.ipynb
 log/
 *.pdf
 *.png
-!1711080678110.png
+!image/README/*.png
 *.npy
 *.pth
 *.txt
