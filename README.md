@@ -25,7 +25,7 @@ This is the official implementation of ***GS-LoRA*** (CVPR 2024). GS-LoRA is eff
 #### a. Clone this repository
 
 ```bash
-https://github.com/bjzhb666/GS-LoRA.git
+git clone https://github.com/bjzhb666/GS-LoRA.git
 cd GS-LoRA
 ```
 
