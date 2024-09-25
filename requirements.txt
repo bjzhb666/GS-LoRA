@@ -1,5 +1,5 @@
 einops==0.7.0
-loralib==0.1.1
+loralib==0.1.2
 matplotlib==3.8.0
 mxnet==1.8.0.post0
 numpy==1.23.5
