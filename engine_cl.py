@@ -16,6 +16,8 @@ import torch.distributed as dist
 import wandb
 
 def get_l2_loss(model, regularization_terms, l2_lambda=0.01):
+    if regularization_terms is None:
+        return torch.tensor(0.0, device=model.device)
     l2_loss = torch.tensor(0.0, device=model.device)
     model_without_ddp = model.module
     reg_loss = torch.tensor(0.0, device=model.device)

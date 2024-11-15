@@ -276,6 +276,7 @@ def get_args_parser():
     parser.add_argument('--si_lambda',default=0.01,type=float,help='lambda for si')
     parser.add_argument('--replay',default=False,action='store_true',help='whether to use replay')
     parser.add_argument('--online',default=False,action='store_true',help='whether to use online regularization')
+    parser.add_argument('--retrain',default=False,action='store_true',help='whether to retrain the model')
     # ewc args
     parser.add_argument('--n_fisher_sample',default=None,type=int,help='number of samples to estimate fisher')
     # forget learning factor
@@ -329,9 +330,9 @@ def main(args):
     
     # freeze the last regression head and classification head
     for name, param in model.named_parameters():
-        if 'bbox_embed' in name:
+        if 'bbox_embed' in name and not args.retrain:
             param.requires_grad = False
-        if 'class_embed' in name:
+        if 'class_embed' in name and not args.retrain:
             param.requires_grad = False
     
     model_without_ddp = model
@@ -629,6 +630,62 @@ def main(args):
         parms_without_ddp = {n:p for n,p in model_without_ddp.named_parameters() if p.requires_grad} # for convenience
         
         # choose the training method, l2, ewc, mas, si, replay+ewc, replay+mas, replay+si, replay+l2
+        if args.retrain:
+            print('retraining baseline', task_i)
+            start_time = time.time()
+            if args.sgd:
+                optimizer = torch.optim.SGD(param_dicts,
+                                        lr=args.lr,
+                                        momentum=0.9,
+                                        weight_decay=args.weight_decay)
+            else:
+                optimizer = torch.optim.AdamW(param_dicts,
+                                            lr=args.lr,
+                                            weight_decay=args.weight_decay)
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer,
+                                                        args.lr_drop)
+            
+            # reinitialize the model
+            model_without_ddp = build_model(args)[0]
+            model_without_ddp.to(device)
+            
+            model_without_ddp = model.module
+
+            retrain_epoch=0
+            for retrain_epoch in range(args.epochs):
+                sampler_cl_forget.set_epoch(retrain_epoch)
+
+                train_stats = train_one_epoch_l2(model=model,criterion=criterion,
+                                                        data_loader_cl_forget=data_loader_remain,
+                                                        device=device,optimizer=optimizer,epoch=retrain_epoch,
+                                                        clip_max_norm=args.clip_max_norm,
+                                                        l2_lambda=0,regularization_terms=None)
+                lr_scheduler.step()
+
+                print("retraining baseline. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_forget,
+                    base_ds_forget, device, args.output_dir)
+                utils.log_wandb(args=args,array=forget_maps,name='forget',task_i=task_i, epoch=retrain_epoch+1)
+                print("retraining baseline. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model, criterion, postprocessors, data_loader_val_remain,
+                    base_ds_remain, device, args.output_dir)
+                utils.log_wandb(args=args,array=remain_maps,name='remain',task_i=task_i, epoch=retrain_epoch+1)
+
+                if task_i > 0:
+                    print("retraining baseline. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model, criterion, postprocessors, data_loader_val_old,
+                        base_ds_old, device, args.output_dir)
+                    utils.log_wandb(args=args,array=old_maps,name='old',task_i=task_i, epoch=retrain_epoch+1)
+            end_time = time.time()
+            total_time = end_time - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print('Training time {}'.format(total_time_str))
+            if args.rank == 0:
+                wandb.log({'time': total_time_str})
+            
         if args.l2:
             print("start l2 training in", task_i)
             start_time = time.time()
@@ -1028,7 +1085,10 @@ if __name__ == '__main__':
             wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-mas'
         if args.si:
             wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-si'
-        
+        if args.retrain:
+            wandb.run.name = 'forget-start' + str(args.num_of_first_cls) + '-per' + str(args.cls_per_phase) + '-retrain'
         if args.replay:
-                wandb.run.name += '-replay'
+            wandb.run.name += '-replay'
+        if args.online:
+            wandb.run.name += '-online'
         wandb.finish()
