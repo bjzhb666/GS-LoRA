@@ -11,50 +11,56 @@ import datasets.transforms as T
 
 class CocoDetection(TvCocoDetection):
 
-    def __init__(self,
-                 img_folder,
-                 ann_file,
-                 transforms,
-                 return_masks,
-                 args,
-                 cls_order,
-                 phase_idx,
-                 incremental,
-                 incremental_val,
-                 val_each_phase,
-                 balanced_ft,
-                 tfs_or_tfh,
-                 num_of_phases,
-                 cls_per_phase,
-                 seed_data,
-                 cache_mode=False,
-                 local_rank=0,
-                 local_size=1,
-                 is_rehearsal=False,):
-        super(CocoDetection, self).__init__(img_folder,
-                                            ann_file,
-                                            args,
-                                            cls_order,
-                                            phase_idx,
-                                            incremental,
-                                            incremental_val,
-                                            val_each_phase,
-                                            balanced_ft,
-                                            tfs_or_tfh,
-                                            num_of_phases,
-                                            cls_per_phase,
-                                            seed_data,
-                                            cache_mode=cache_mode,
-                                            local_rank=local_rank,
-                                            local_size=local_size,
-                                            is_rehearsal=is_rehearsal)
+    def __init__(
+        self,
+        img_folder,
+        ann_file,
+        transforms,
+        return_masks,
+        args,
+        cls_order,
+        phase_idx,
+        incremental,
+        incremental_val,
+        val_each_phase,
+        balanced_ft,
+        tfs_or_tfh,
+        num_of_phases,
+        cls_per_phase,
+        seed_data,
+        cache_mode=False,
+        local_rank=0,
+        local_size=1,
+        is_rehearsal=False,
+        is_train=False,
+    ):
+        super(CocoDetection, self).__init__(
+            img_folder,
+            ann_file,
+            args,
+            cls_order,
+            phase_idx,
+            incremental,
+            incremental_val,
+            val_each_phase,
+            balanced_ft,
+            tfs_or_tfh,
+            num_of_phases,
+            cls_per_phase,
+            seed_data,
+            cache_mode=cache_mode,
+            local_rank=local_rank,
+            local_size=local_size,
+            is_rehearsal=is_rehearsal,
+            is_train=is_train,
+        )
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
 
     def __getitem__(self, idx):
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
-        target = {'image_id': image_id, 'annotations': target}
+        target = {"image_id": image_id, "annotations": target}
         img, target = self.prepare(img, target)
         if self._transforms is not None:
             img, target = self._transforms(img, target)
@@ -79,6 +85,9 @@ def convert_coco_poly_to_mask(segmentations, height, width):
 
 
 class ConvertCocoPolysToMask(object):
+    """
+    将 COCO 数据集中的多边形注释转换为掩码的类
+    """
 
     def __init__(self, return_masks=False):
         self.return_masks = return_masks
@@ -91,9 +100,7 @@ class ConvertCocoPolysToMask(object):
 
         anno = target["annotations"]
 
-        anno = [
-            obj for obj in anno if 'iscrowd' not in obj or obj['iscrowd'] == 0
-        ]
+        anno = [obj for obj in anno if "iscrowd" not in obj or obj["iscrowd"] == 0]
 
         boxes = [obj["bbox"] for obj in anno]
         # guard against no boxes via resizing
@@ -137,7 +144,8 @@ class ConvertCocoPolysToMask(object):
         # for conversion to coco api
         area = torch.tensor([obj["area"] for obj in anno])
         iscrowd = torch.tensor(
-            [obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno])
+            [obj["iscrowd"] if "iscrowd" in obj else 0 for obj in anno]
+        )
         target["area"] = area[keep]
         target["iscrowd"] = iscrowd[keep]
 
@@ -149,45 +157,58 @@ class ConvertCocoPolysToMask(object):
 
 def make_coco_transforms(image_set):
 
-    normalize = T.Compose([
-        T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+    normalize = T.Compose(
+        [T.ToTensor(), T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]
+    )
 
     scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
-    if image_set == 'train':
-        return T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomSelect(
-                T.RandomResize(scales, max_size=1333),
-                T.Compose([
-                    T.RandomResize([400, 500, 600]),
-                    T.RandomSizeCrop(384, 600),
+    if image_set == "train":
+        return T.Compose(
+            [
+                T.RandomHorizontalFlip(),
+                T.RandomSelect(
                     T.RandomResize(scales, max_size=1333),
-                ])),
-            normalize,
-        ])
+                    T.Compose(
+                        [
+                            T.RandomResize([400, 500, 600]),
+                            T.RandomSizeCrop(384, 600),
+                            T.RandomResize(scales, max_size=1333),
+                        ]
+                    ),
+                ),
+                normalize,
+            ]
+        )
 
-    if image_set == 'val':
-        return T.Compose([
-            T.RandomResize([800], max_size=1333),
-            normalize,
-        ])
+    if image_set == "val":
+        return T.Compose(
+            [
+                T.RandomResize([800], max_size=1333),
+                normalize,
+            ]
+        )
 
-    raise ValueError(f'unknown {image_set}')
+    raise ValueError(f"unknown {image_set}")
 
 
-def build(image_set, args, cls_order, phase_idx, incremental, incremental_val,
-          val_each_phase, balanced_ft, is_rehearsal):
+def build(
+    image_set,
+    args,
+    cls_order,
+    phase_idx,
+    incremental,
+    incremental_val,
+    val_each_phase,
+    balanced_ft,
+    is_rehearsal,
+):
     root = Path(args.coco_path)
-    assert root.exists(), f'provided COCO path {root} does not exist'
-    mode = 'instances'
+    assert root.exists(), f"provided COCO path {root} does not exist"
+    mode = "instances"
     PATHS = {
-        "train":
-        (root / "train2017", root / "annotations" / f'{mode}_train2017.json'),
-        "val":
-        (root / "val2017", root / "annotations" / f'{mode}_val2017.json'),
+        "train": (root / "train2017", root / "annotations" / f"{mode}_train2017.json"),
+        "val": (root / "val2017", root / "annotations" / f"{mode}_val2017.json"),
     }
 
     num_of_phases = args.num_of_phases
@@ -197,13 +218,26 @@ def build(image_set, args, cls_order, phase_idx, incremental, incremental_val,
 
     img_folder, ann_file = PATHS[image_set]
 
-    dataset = CocoDetection(img_folder, ann_file, transforms=make_coco_transforms(image_set),
-                            return_masks=args.masks, args=args, cls_order=cls_order, \
-                                phase_idx=phase_idx, incremental=incremental, \
-                                    incremental_val=incremental_val, val_each_phase=val_each_phase, \
-                                        balanced_ft=balanced_ft, tfs_or_tfh=tfs_or_tfh,\
-                                            num_of_phases=num_of_phases, cls_per_phase=cls_per_phase, \
-                                                seed_data=seed_data, cache_mode=args.cache_mode, \
-                                                    local_rank=get_local_rank(), local_size=get_local_size(), \
-                                                        is_rehearsal=is_rehearsal)
+    dataset = CocoDetection(
+        img_folder,
+        ann_file,
+        transforms=make_coco_transforms(image_set),
+        return_masks=args.masks,
+        args=args,
+        cls_order=cls_order,
+        phase_idx=phase_idx,
+        incremental=incremental,
+        incremental_val=incremental_val,
+        val_each_phase=val_each_phase,
+        balanced_ft=balanced_ft,
+        tfs_or_tfh=tfs_or_tfh,
+        num_of_phases=num_of_phases,
+        cls_per_phase=cls_per_phase,
+        seed_data=seed_data,
+        cache_mode=args.cache_mode,
+        local_rank=get_local_rank(),
+        local_size=get_local_size(),
+        is_rehearsal=is_rehearsal,
+        is_train=(image_set == "train"),
+    )
     return dataset

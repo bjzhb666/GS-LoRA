@@ -1,16 +1,20 @@
 import torch
 
+
 def to_cuda(samples, targets, device):
     samples = samples.to(device, non_blocking=True)
-    targets = [{k: v.to(device, non_blocking=True) for k, v in t.items()} for t in targets]
+    targets = [
+        {k: v.to(device, non_blocking=True) for k, v in t.items()} for t in targets
+    ]
     return samples, targets
 
-class data_prefetcher():
+
+class data_prefetcher:
     def __init__(self, loader, device, prefetch=True):
-        '''
-         The purpose of this class is to preload data from a loader object
-           and move it to the device (GPU) for faster processing.  
-        '''
+        """
+        The purpose of this class is to preload data from a loader object
+          and move it to the device (GPU) for faster processing.
+        """
         self.loader = iter(loader)
         self.prefetch = prefetch
         self.device = device
@@ -21,13 +25,17 @@ class data_prefetcher():
     def preload(self):
         try:
             self.next_samples, self.next_targets = next(self.loader)
-        except StopIteration: # 如果使用Dataloader的next()方法取完了所有元素，再次调用next()方法会抛出StopIteration异常
+        except (
+            StopIteration
+        ):  # 如果使用Dataloader的next()方法取完了所有元素，再次调用next()方法会抛出StopIteration异常
             self.next_samples = None
             self.next_targets = None
             return
         with torch.cuda.stream(self.stream):
-            self.next_samples, self.next_targets = to_cuda(self.next_samples, self.next_targets, self.device)
-            
+            self.next_samples, self.next_targets = to_cuda(
+                self.next_samples, self.next_targets, self.device
+            )
+
     def next(self):
         if self.prefetch:
             torch.cuda.current_stream().wait_stream(self.stream)
