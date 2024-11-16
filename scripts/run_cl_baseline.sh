@@ -50,11 +50,20 @@ lr=3e-4
 #         --seed_cls 123  \
 #         --num_tasks 1 --Der --DER_lambda 0.001 --wandb_offline
 
-# DER++
+# # DER++
+# GPUS_PER_NODE=8 ./tools/run_dist_launch.sh 8 --master_port 29500 ./configs/r50_deformable_detr_CL_baseline.sh \
+#         --batch_size 4 --output_dir ./exps-CL/start${NUM_FIRST_CLS}-each${CLS_PER_PHASE}-DER \
+#         --resume /data3/hongbo_zhao/CL-DETR/exps/r50_deformable_detr/r50_deformable_detr-checkpoint.pth \
+#         --epoch 1 --lr $lr --cache_mode  \
+#         --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE  --no_aux_loss \
+#         --seed_cls 123  \
+#         --num_tasks 1 --Der --DER_lambda 0.001 --DER_plus --DER_plus_lambda 0.1 --wandb_offline
+
+# FDR
 GPUS_PER_NODE=8 ./tools/run_dist_launch.sh 8 --master_port 29500 ./configs/r50_deformable_detr_CL_baseline.sh \
         --batch_size 4 --output_dir ./exps-CL/start${NUM_FIRST_CLS}-each${CLS_PER_PHASE}-DER \
         --resume /data3/hongbo_zhao/CL-DETR/exps/r50_deformable_detr/r50_deformable_detr-checkpoint.pth \
         --epoch 1 --lr $lr --cache_mode  \
         --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE  --no_aux_loss \
         --seed_cls 123  \
-        --num_tasks 1 --Der --DER_lambda 0.001 --DER_plus --DER_plus_lambda 0.1 --wandb_offline
+        --num_tasks 1 --FDR --FDR_lambda 0.01 --wandb_offline

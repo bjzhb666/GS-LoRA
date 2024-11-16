@@ -20,6 +20,7 @@ import datasets.samplers as samplers
 import util.cal_norm as cal_norm
 import util.misc as utils
 from baselines.DERtrain import train_one_epoch_DER
+from baselines.FDRtrain import train_one_epoch_FDR
 from datasets import CLDatasetWrapper, build_dataset, get_coco_api_from_dataset
 from datasets.incremental import generate_cls_order
 from engine import evaluate
@@ -1466,6 +1467,107 @@ def main(args):
 
                 if task_i > 0:
                     print("DER training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model,
+                        criterion,
+                        postprocessors,
+                        data_loader_val_old,
+                        base_ds_old,
+                        device,
+                        args.output_dir,
+                    )
+                    utils.log_wandb(
+                        args=args,
+                        array=old_maps,
+                        name="old",
+                        task_i=task_i,
+                        epoch=epoch + 1,
+                    )
+
+            end_time = time.time()
+            total_time = end_time - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print("Training time {}".format(total_time_str))
+            if args.rank == 0:
+                wandb.log({"time": total_time_str})
+
+        if args.FDR:
+            print("start FDR training in task", task_i)
+            start_time = time.time()
+
+            # reinitialize the optimizer
+            if args.sgd:
+                optimizer = torch.optim.SGD(
+                    param_dicts,
+                    lr=args.lr,
+                    momentum=0.9,
+                    weight_decay=args.weight_decay,
+                )
+            else:
+                optimizer = torch.optim.AdamW(
+                    param_dicts, lr=args.lr, weight_decay=args.weight_decay
+                )
+
+            lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+
+            epoch = 0
+            for epoch in range(args.epochs):
+                if args.distributed:
+                    sampler_forget.set_epoch(epoch)
+                    sampler_remain.set_epoch(epoch)
+
+                train_stats = train_one_epoch_FDR(
+                    student_model=model,
+                    teacher_model=teacher_model,
+                    criterion=criterion,
+                    data_loader_forget=data_loader_forget,
+                    data_loader_remain=data_loader_remain,
+                    optimizer=optimizer,
+                    device=device,
+                    epoch=epoch,
+                    max_norm=args.clip_max_norm,
+                    reg_lambda=args.FDR_lambda,
+                )
+                lr_scheduler.step()
+
+                print("FDR training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_forget,
+                    base_ds_forget,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=forget_maps,
+                    name="forget",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+
+                print("FDR training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_remain,
+                    base_ds_remain,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=remain_maps,
+                    name="remain",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+
+                if task_i > 0:
+                    print("FDR training. Testing for old classes")
                     test_stats_old, coco_evaluator_old, old_maps = evaluate(
                         model,
                         criterion,

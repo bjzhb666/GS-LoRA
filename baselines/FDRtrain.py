@@ -8,15 +8,18 @@ import torch
 import util.misc as utils
 from datasets.data_prefetcher import data_prefetcher
 
-
-def DER_regularzaion_loss(preds, gts):
-    diff = preds - gts
-    norm = torch.norm(diff, p=2)
-    squared_l2_norm = norm * norm
-    return squared_l2_norm
+"""
+Implementation of Hilbert-constrained gradient descent.
+From MEASURING AND REGULARIZING NETWORKS IN FUNCTION SPACE (ICLR 2019)
+"""
 
 
-def train_one_epoch_DER(
+def regularization_loss(outputs, target_logits):
+    loss = torch.norm(outputs - target_logits, 2, 1).mean()
+    return loss
+
+
+def train_one_epoch_FDR(
     student_model: torch.nn.Module,
     teacher_model: torch.nn.Module,
     criterion: torch.nn.Module,
@@ -26,9 +29,7 @@ def train_one_epoch_DER(
     device: torch.device,
     epoch: int,
     max_norm: float = 0,
-    lambda_der: float = 0.0,
-    plus: bool = False,
-    lambda_der_plus: float = 0.0,
+    reg_lambda: float = 0.0,
 ):
     student_model.train()
     criterion.train()
@@ -63,29 +64,11 @@ def train_one_epoch_DER(
                 "pred_logits"
             ].detach()
 
-        loss_der = DER_regularzaion_loss(
+        loss_FDR = regularization_loss(
             outputs_remain["pred_logits"], teacher_outputs_remain["pred_logits"]
         )
 
-        losses_CE_next = torch.tensor(0.0)
-
-        if plus:
-            inputs_remain_next, targets_remain_next = prefetcher_remain.next()
-            if inputs_remain_next is None:
-                prefetcher_remain = data_prefetcher(
-                    data_loader_remain, device, prefetch=True
-                )
-                inputs_remain_next, targets_remain_next = prefetcher_remain.next()
-            outputs_remain_next = student_model(inputs_remain_next)
-            losses_CE_next = criterion(outputs_remain_next, targets_remain_next)
-            weight_dict_CE_next = criterion.weight_dict
-            losses_CE_next = sum(
-                losses_CE_next[k] * weight_dict_CE_next[k]
-                for k in losses_CE_next.keys()
-                if k in weight_dict_CE_next
-            )
-
-        loss_total = losses + lambda_der * loss_der + lambda_der_plus * losses_CE_next
+        loss_total = losses + reg_lambda * loss_FDR
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced_forget = utils.reduce_dict(loss_dict_forget)
@@ -98,14 +81,9 @@ def train_one_epoch_DER(
             if k in weight_dict
         }
         losses_reduced_scaled = sum(loss_dict_reduced_forget_scaled.values())
-        loss_value = (
-            losses_reduced_scaled.item()
-            + lambda_der * loss_der.item()
-            + lambda_der_plus * losses_CE_next.item()
-        )
+        loss_value = losses_reduced_scaled.item() + reg_lambda * loss_FDR.item()
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
-            print(loss_dict_reduced_forget)
             sys.exit(1)
 
         optimizer.zero_grad()
@@ -122,14 +100,12 @@ def train_one_epoch_DER(
         optimizer.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced_forget_scaled)
-        metric_logger.update(loss_der=loss_der.item() * lambda_der)
-        if plus:
-            metric_logger.update(loss_CE_next=losses_CE_next.item())
+        metric_logger.update(loss_FDR=loss_FDR.item() * reg_lambda)
         metric_logger.update(grad_norm=grad_total_norm)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
 
-        inputs_forget, targets_forget = prefetcher_forget.next()
         inputs_remain, targets_remain = prefetcher_remain.next()
+        inputs_forget, targets_forget = prefetcher_forget.next()
 
         if inputs_forget is None:
             prefetcher_forget = data_prefetcher(
