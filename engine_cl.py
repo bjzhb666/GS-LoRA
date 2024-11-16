@@ -6,11 +6,8 @@ import math
 import os
 import sys
 from typing import Iterable
-from util import box_ops
 import torch
 import util.misc as utils
-from datasets.coco_eval import CocoEvaluator
-from datasets.panoptic_eval import PanopticEvaluator
 from datasets.data_prefetcher import data_prefetcher
 import numpy as np
 import torch.distributed as dist

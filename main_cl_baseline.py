@@ -1,35 +1,30 @@
 import argparse
+import copy
 import datetime
 import json
+import os
 import random
 import time
+import warnings
+from collections import OrderedDict
 from pathlib import Path
-import copy
 
 import numpy as np
 import torch
+import torch.distributed as dist
+import wandb
 from torch.utils.data import DataLoader
+
 import datasets
-import util.misc as utils
 import datasets.samplers as samplers
-from datasets import build_dataset, get_coco_api_from_dataset, CLDatasetWrapper
+import util.cal_norm as cal_norm
+import util.misc as utils
+from baselines.DERtrain import train_one_epoch_DER
+from datasets import CLDatasetWrapper, build_dataset, get_coco_api_from_dataset
 from datasets.incremental import generate_cls_order
 from engine import evaluate
-from engine_cl import (
-    train_one_epoch_l2,
-    train_one_epoch_ewc,
-    train_one_epoch_mas,
-    train_one_epoch_si,
-)
+from engine_cl import train_one_epoch_ewc, train_one_epoch_l2, train_one_epoch_mas
 from models import build_model
-import wandb
-import os
-from collections import OrderedDict
-import util.cal_norm as cal_norm
-import torch.distributed as dist
-from baselines.random_drop import random_drop_weights
-
-import warnings
 
 warnings.filterwarnings("ignore")
 
@@ -234,21 +229,15 @@ def get_args_parser():
     parser.add_argument("--seed_cls", default=123, type=int)
     parser.add_argument("--seed_data", default=123, type=int)
     parser.add_argument("--method", default="icarl", choices=["baseline", "icarl"])
-    parser.add_argument(
-        "--mem_rate", default=0.1, type=float, help="memory rate of the rehearsal set"
-    )
 
     parser.add_argument("--debug_mode", default=False, action="store_true")
     parser.add_argument("--balanced_ft", default=False, action="store_true")
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--debug_flag", default=False, action="store_true")
 
-    # rehearsal rate and forget rate of the corresponding dataset
+    # remain(memory) and forget rate of the corresponding dataset
     parser.add_argument(
-        "--rehearsal_rate",
-        default=0.1,
-        type=float,
-        help="rehearsal rate of the rehearsal set",
+        "--mem_rate", default=0.1, type=float, help="memory rate of the rehearsal set"
     )
     parser.add_argument(
         "--forget_rate", default=0.1, type=float, help="memory rate of the forget set"
@@ -351,6 +340,54 @@ def get_args_parser():
     parser.add_argument("--this_task_start_cls", default=0, type=int)
     parser.add_argument("--this_task_end_cls", default=0, type=int)
     parser.add_argument("--cl_beta_list", nargs="*", default=[], type=float)
+
+    # baselines args
+    parser.add_argument("--SCRUB", default=False, action="store_true")
+    parser.add_argument(
+        "--sgda_smoothing", default=0.0, type=float, help="smoothing factor for SGDA"
+    )
+    parser.add_argument(
+        "--sgda_alpha", default=0.001, type=float, help="alpha for sgda"
+    )
+    parser.add_argument(
+        "--sgda_learning_rate", default=1e-4, type=float, help="lr for sgda"
+    )
+    parser.add_argument(
+        "--sgda_momentum", default=0.9, type=float, help="momentum for sgda"
+    )
+    parser.add_argument(
+        "--sgda_weight_decay", default=5e-4, type=float, help="weight_decay for sgda"
+    )
+    parser.add_argument(
+        "--SCRUB_superepoch", default=10, type=int, help="superepoch for sgda"
+    )
+    parser.add_argument(
+        "--kd_T", default=2.0, type=float, help="temperature for kd loss"
+    )
+    parser.add_argument(
+        "--scrub_decay_epoch", default=100, type=int, help="decay epoch for sgda"
+    )
+
+    # DER method
+    parser.add_argument(
+        "--Der", default=False, action="store_true", help="whether to use DER"
+    )
+    parser.add_argument("--DER_lambda", default=0.1, type=float, help="lambda for DER")
+    parser.add_argument(
+        "--DER_plus", default=False, action="store_true", help="whether to use DER_plus"
+    )
+    parser.add_argument(
+        "--DER_plus_lambda", default=0.1, type=float, help="lambda for DER_plus"
+    )
+    # FDR method
+    parser.add_argument(
+        "--FDR", default=False, action="store_true", help="whether to use FDR"
+    )
+    parser.add_argument("--FDR_lambda", default=0.1, type=float, help="lambda for FDR")
+
+    # few shot setting
+    parser.add_argument("--few_shot", default=False, action="store_true")
+    parser.add_argument("--few_shot_num", default=8, type=int)
     return parser
 
 
@@ -415,6 +452,35 @@ def main(args):
 
     regularization_terms = {}  # for regularization terms
 
+    if args.Der:
+        teacher_model = copy.deepcopy(model)
+        teacher_model.to(device)
+        teacher_model.eval()
+        # freeze the teacher model
+        for param in teacher_model.parameters():
+            param.requires_grad = False
+
+    if args.FDR:
+        teacher_model = copy.deepcopy(model)
+        teacher_model.to(device)
+        teacher_model.eval()
+        # freeze the teacher model
+        for param in teacher_model.parameters():
+            param.requires_grad = False
+
+    if args.SCRUB:
+        teacher_model = copy.deepcopy(model)
+        teacher_model.to(device)
+        teacher_model.eval()
+
+        beta = 0.1
+
+        def avg_fn(averaged_model_parameter, model_parameter):
+            return (1 - beta) * averaged_model_parameter + beta * model_parameter
+
+        swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=avg_fn)
+        swa_model = swa_model.to(device)
+
     # TODO: need to add origin dataset for the first task
     # origin_dataset =
     for task_i in range(args.num_tasks):  # start from 0
@@ -422,8 +488,11 @@ def main(args):
         print("\n")
         print("*****************task_i:", task_i, "***********************")
         print("\n")
-        args.num_of_first_cls = origin_first_task_cls - task_i * args.cls_per_phase
 
+        args.num_of_first_cls = origin_first_task_cls - task_i * args.cls_per_phase
+        print("\033[91mFor remain dataset:\033[0m")
+        print("num_of_first_cls:", args.num_of_first_cls, "select [: num_of_first_cls]")
+        print("")
         dataset_remain = build_dataset(
             image_set="train",
             args=args,
@@ -433,9 +502,15 @@ def main(args):
             incremental_val=False,
             val_each_phase=False,
             is_rehearsal=True,
-        )  # is_rehearal will use args.rehearsal_rate
+        )
+
         args.this_task_start_cls = origin_first_task_cls - task_i * args.cls_per_phase
         args.this_task_end_cls = args.this_task_start_cls + args.cls_per_phase
+        print("\033[91mFor forget dataset:\033[0m")
+        print("this task start cls:", args.this_task_start_cls)
+        print("this task end cls:", args.this_task_end_cls)
+        print("select [this_task_start_cls: this_task_end_cls]")
+        print("")
         dataset_forget = build_dataset(
             image_set="train",
             args=args,
@@ -445,6 +520,7 @@ def main(args):
             incremental_val=False,
             val_each_phase=False,
         )
+        print("\033[91mFor val dataset:\033[0m")
         dataset_val_remain = build_dataset(
             image_set="val",
             args=args,
@@ -615,6 +691,7 @@ def main(args):
                 num_workers=args.num_workers,
                 pin_memory=True,
             )
+
         if args.replay:
             data_loader_total = DataLoader(
                 dataset_total,
@@ -623,6 +700,7 @@ def main(args):
                 num_workers=args.num_workers,
                 pin_memory=True,
             )
+
         if task_i > 0:
             data_loader_val_old = DataLoader(
                 dataset_val_old,
@@ -788,6 +866,7 @@ def main(args):
                         task_i="resumed-eval",
                         epoch=0,
                     )
+
         if args.eval:
             print("Testing for forget classes")
             test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
@@ -1303,8 +1382,13 @@ def main(args):
             if args.rank == 0:
                 wandb.log({"time": total_time_str})
 
-        if args.si:
-            print("start si training in task", task_i)
+        if args.Der:
+            #  如果模型只用于推理，不需要 DDP，teacher model不需要
+            if args.DER_plus:
+                print("start DER++ training in task", task_i)
+            else:
+                print("start DER training in task", task_i)
+
             start_time = time.time()
 
             # reinitialize the optimizer
@@ -1321,6 +1405,90 @@ def main(args):
                 )
 
             lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
+
+            epoch = 0
+            for epoch in range(args.epochs):
+                if args.distributed:
+                    sampler_forget.set_epoch(epoch)
+                    sampler_remain.set_epoch(epoch)
+
+                train_stats = train_one_epoch_DER(
+                    student_model=model,
+                    teacher_model=teacher_model,
+                    criterion=criterion,
+                    data_loader_forget=data_loader_forget,
+                    data_loader_remain=data_loader_remain,
+                    optimizer=optimizer,
+                    device=device,
+                    epoch=epoch,
+                    max_norm=args.clip_max_norm,
+                    lambda_der=args.DER_lambda,
+                    plus=args.DER_plus,
+                    lambda_der_plus=args.DER_plus_lambda,
+                )
+                lr_scheduler.step()
+
+                print("DER training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_forget,
+                    base_ds_forget,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=forget_maps,
+                    name="forget",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+
+                print("DER training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_remain,
+                    base_ds_remain,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=remain_maps,
+                    name="remain",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+
+                if task_i > 0:
+                    print("DER training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model,
+                        criterion,
+                        postprocessors,
+                        data_loader_val_old,
+                        base_ds_old,
+                        device,
+                        args.output_dir,
+                    )
+                    utils.log_wandb(
+                        args=args,
+                        array=old_maps,
+                        name="old",
+                        task_i=task_i,
+                        epoch=epoch + 1,
+                    )
+
+            end_time = time.time()
+            total_time = end_time - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print("Training time {}".format(total_time_str))
+            if args.rank == 0:
+                wandb.log({"time": total_time_str})
 
         if args.MAS:
             print("start mas training in task", task_i)
