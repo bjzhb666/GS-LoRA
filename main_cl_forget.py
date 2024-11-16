@@ -231,20 +231,14 @@ def get_args_parser():
     parser.add_argument("--seed_cls", default=123, type=int)
     parser.add_argument("--seed_data", default=123, type=int)
     parser.add_argument("--method", default="icarl", choices=["baseline", "icarl"])
-    parser.add_argument(
-        "--mem_rate", default=0.1, type=float, help="memory rate of the rehearsal set"
-    )
 
     parser.add_argument("--debug_mode", default=False, action="store_true")
     parser.add_argument("--balanced_ft", default=False, action="store_true")
     parser.add_argument("--eval", action="store_true")
 
-    # rehearsal rate and forget rate of the corresponding dataset
+    # remain(memory) rate and forget rate of the corresponding dataset
     parser.add_argument(
-        "--rehearsal_rate",
-        default=0.1,
-        type=float,
-        help="rehearsal rate of the rehearsal set",
+        "--mem_rate", default=0.1, type=float, help="memory rate of the rehearsal set"
     )
     parser.add_argument(
         "--forget_rate", default=0.1, type=float, help="memory rate of the forget set"
@@ -377,6 +371,7 @@ def main(args):
             mode="offline" if args.wandb_offline else "online",
         )
         wandb.config.update(args)
+
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
@@ -387,13 +382,16 @@ def main(args):
 
     model, criterion, postprocessors = build_model(args)
     model.to(device)
+
     if "None" not in args.lora_pos:
         print("Training", args.lora_pos)
         lora.mark_only_lora_as_trainable(model)  # only train LoRA
+
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("number of params:", n_parameters)
     print("ratio of params:", n_parameters / 39847265)
+
     if args.rank == 0:
         wandb.log(
             {
@@ -412,6 +410,7 @@ def main(args):
         raise ValueError("Please set the correct data setting.")
 
     origin_first_task_cls = args.num_of_first_cls
+
     for task_i in range(args.num_tasks):  # start from 0
         # modify num_of_first_cls according to task id
         print("\n")
@@ -420,6 +419,9 @@ def main(args):
         args.num_of_first_cls = origin_first_task_cls - task_i * args.cls_per_phase
 
         print("building dataset remain train...")
+        print("\033[91mFor remain dataset:\033[0m")
+        print("this task start cls:", args.this_task_start_cls)
+        print("this task end cls:", args.this_task_end_cls)
         dataset_remain = build_dataset(
             image_set="train",
             args=args,
@@ -429,11 +431,14 @@ def main(args):
             incremental_val=False,
             val_each_phase=False,
             is_rehearsal=True,
-        )  # is_rehearal will use args.rehearsal_rate
+        )
         args.this_task_start_cls = origin_first_task_cls - task_i * args.cls_per_phase
         args.this_task_end_cls = args.this_task_start_cls + args.cls_per_phase
 
         print("building dataset forget train...")
+        print("\033[91mFor forget dataset:\033[0m")
+        print("this task start cls:", args.this_task_start_cls)
+        print("this task end cls:", args.this_task_end_cls)
         dataset_forget = build_dataset(
             image_set="train",
             args=args,
@@ -819,6 +824,7 @@ def main(args):
             for epoch in range(args.epochs):
                 if args.distributed:
                     sampler_forget.set_epoch(epoch)
+                    sampler_remain.set_epoch(epoch)
 
                 train_stats = train_one_epoch_forget_cls(
                     model,
@@ -851,6 +857,7 @@ def main(args):
                     task_i=task_i,
                     epoch=epoch + 1,
                 )
+
                 print("One stage training. Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model,
@@ -921,8 +928,10 @@ def main(args):
             total_time = time.time() - start_time
             total_time_str = str(datetime.timedelta(seconds=int(total_time)))
             print("Training time {}".format(total_time_str))
+
             if dist.get_rank() == 0:
                 wandb.log({"time": total_time_str})
+
             # get the norm of the lora model for visualization
             norm_list = cal_norm.get_norm_of_lora(model_without_ddp)
             if args.rank == 0:
@@ -932,6 +941,7 @@ def main(args):
             print("start directly rehearsal training")
             start_time = time.time()
             remain_epoch = 0
+
             for remain_epoch in range(args.finetune_rehearsal_epoch):
                 if args.distributed:
                     sampler_remain.set_epoch(remain_epoch)

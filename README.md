@@ -92,3 +92,6 @@ do
 done
 done
 ```
+
+Rehearsal training is used the pre-trained model and only use the remain data to fine-tune the model.
+Retrain is use the remain data to train the model from scratch.

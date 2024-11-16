@@ -67,7 +67,7 @@ class COCO:
             ), "annotation file format {} not supported".format(type(dataset))
             print("Done (t={:0.2f}s)".format(time.time() - tic))
             self.dataset = dataset
-            # self.createIndex(args, cls_order, phase_idx, incremental, incremental_val, val_each_phase, balanced_ft, tfs_or_tfh, num_of_phases, cls_per_phase, seed_data, is_rehearsal)
+
             self.createIndexByCls(
                 args,
                 cls_order,
@@ -123,7 +123,8 @@ class COCO:
                         selected_cls_this_phase = cls_order[
                             args.this_task_start_cls : args.this_task_end_cls
                         ]
-
+                print("selected_cls_this_phase: ", selected_cls_this_phase)
+                print("len(selected_cls_this_phase): ", len(selected_cls_this_phase))
             else:
                 raise ValueError("Please set the correct data setting.")
 
@@ -163,7 +164,7 @@ class COCO:
                 if tfs_or_tfh == "tfh":
                     random.seed(seed_data)
 
-                    if is_rehearsal:  # rehearsal_rate of data is used for training
+                    if is_rehearsal:
                         if not args.few_shot:  # not few-shot
                             num_selected_img_this_phase = int(
                                 num_img_this_phase * args.mem_rate
