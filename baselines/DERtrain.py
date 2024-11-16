@@ -1,19 +1,12 @@
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from typing import Iterable
 import util.misc as utils
 import math
-import os
 import sys
 from typing import Iterable
-from util import box_ops
 import torch
 import util.misc as utils
-from datasets.coco_eval import CocoEvaluator
 from datasets.data_prefetcher import data_prefetcher
-import numpy as np
-import torch.distributed as dist
 
 
 def DER_regularzaion_loss(preds, gts):
@@ -84,6 +77,12 @@ def train_one_epoch_DER(
                 inputs_remain_next, targets_remain_next = prefetcher_remain.next()
             outputs_remain_next = student_model(inputs_remain_next)
             losses_CE_next = criterion(outputs_remain_next, targets_remain_next)
+            weight_dict_CE_next = criterion.weight_dict
+            losses_CE_next = sum(
+                losses_CE_next[k] * weight_dict_CE_next[k]
+                for k in losses_CE_next.keys()
+                if k in weight_dict_CE_next
+            )
 
         loss_total = losses + lambda_der * loss_der + lambda_der_plus * losses_CE_next
 
@@ -122,7 +121,7 @@ def train_one_epoch_DER(
         optimizer.step()
 
         metric_logger.update(loss=loss_value, **loss_dict_reduced_forget_scaled)
-        metric_logger.update(loss_der=loss_der.item())
+        metric_logger.update(loss_der=loss_der.item() * lambda_der)
         if plus:
             metric_logger.update(loss_CE_next=losses_CE_next.item())
         metric_logger.update(grad_norm=grad_total_norm)
