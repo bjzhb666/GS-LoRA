@@ -15,12 +15,13 @@ lr=3e-4
 
 # # l2
 # GPUS_PER_NODE=8 ./tools/run_dist_launch.sh 8 --master_port 29500 ./configs/r50_deformable_detr_CL_baseline.sh \
-#         --batch_size 2 --output_dir ./exps-CL/start${NUM_FIRST_CLS}-each${CLS_PER_PHASE}-l2 \
+#         --batch_size 4 --output_dir ./exps-CL/start${NUM_FIRST_CLS}-each${CLS_PER_PHASE}-l2 \
 #         --resume /data3/hongbo_zhao/CL-DETR/exps/r50_deformable_detr/r50_deformable_detr-checkpoint.pth \
 #         --epoch 30 --lr $lr --cache_mode  \
 #         --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE  --no_aux_loss \
 #         --seed_cls 123  --l2_lambda 0.01\
-#         --num_tasks 1 --l2 --replay
+#         --num_tasks 2 --l2 --replay 
+
 
 # # ewc
 # GPUS_PER_NODE=8 ./tools/run_dist_launch.sh 8 --master_port 39500 ./configs/r50_deformable_detr_CL_baseline.sh \
@@ -75,5 +76,5 @@ GPUS_PER_NODE=8 ./tools/run_dist_launch.sh  8  --master_port 29500 \
         --epoch 30 --lr $lr --cache_mode \
         --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE --no_aux_loss \
         --seed_cls 123 \
-        --num_tasks 7 --SCRUB_superepoch 3 --sgda_smoothing 0 --SCRUB # --wandb_offline \
-        # --few_shot --few_shot_num 20
+        --num_tasks 7 --SCRUB_superepoch 3 --sgda_smoothing 0 --SCRUB  # --wandb_offline \
+         # --few_shot --few_shot_num 20
