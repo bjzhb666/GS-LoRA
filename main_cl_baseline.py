@@ -673,8 +673,40 @@ def main(args):
         )
         if task_i == 0:
             # we need a dataloader that combines all the classes to calculate the importance matrix
-            dataset_importance = torch.utils.data.ConcatDataset(
-                [dataset_remain, dataset_forget]
+            dataset_importance = dataset_remain
+            if args.distributed:
+                if args.cache_mode:
+                    sampler_importance = samplers.NodeDistributedSampler(
+                        dataset_importance
+                    )
+                else:
+                    sampler_importance = samplers.DistributedSampler(dataset_importance)
+            else:
+                sampler_importance = torch.utils.data.RandomSampler(dataset_importance)
+            batch_sampler_importance = torch.utils.data.BatchSampler(
+                sampler_importance, args.batch_size, drop_last=False
+            )
+            data_loader_importance = DataLoader(
+                dataset_importance,
+                batch_sampler=batch_sampler_importance,
+                collate_fn=utils.collate_fn,
+                num_workers=args.num_workers,
+                pin_memory=True,
+            )
+        elif task_i < args.num_tasks - 1:
+            args_importance = copy.deepcopy(args)
+            args_importance.num_of_first_cls = (
+                origin_first_task_cls - (task_i + 1) * args.cls_per_phase
+            )
+            dataset_importance = build_dataset(
+                image_set="train",
+                args=args_importance,
+                cls_order=cls_order,
+                phase_idx=0,
+                incremental=True,
+                incremental_val=False,
+                val_each_phase=False,
+                is_rehearsal=True,
             )
             if args.distributed:
                 if args.cache_mode:
@@ -695,6 +727,8 @@ def main(args):
                 num_workers=args.num_workers,
                 pin_memory=True,
             )
+        else:
+            print("This is the last task, no need to calculate the importance matrix")
 
         if args.replay:
             data_loader_total = DataLoader(
@@ -1141,20 +1175,27 @@ def main(args):
                 if p.requires_grad:
                     task_param[n] = p.clone().detach()
 
-            # 3. calculate the importance matrix and get the regularization terms
-            importance = calculate_importance_l2(model_without_ddp, data_loader_remain)
-            if (
-                args.online and len(regularization_terms) > 0
-            ):  # only have one importance matrix
-                regularization_terms[0] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+            if task_i < args.num_tasks - 1:
+                # 3. calculate the importance matrix and get the regularization terms
+                importance = calculate_importance_l2(
+                    model_without_ddp, data_loader_remain
+                )
+                if (
+                    args.online and len(regularization_terms) > 0
+                ):  # only have one importance matrix
+                    regularization_terms[0] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
+                else:
+                    regularization_terms[task_i + 1] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
             else:
-                regularization_terms[task_i + 1] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+                print(
+                    "This is the last task, no need to calculate the importance matrix"
+                )
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -1364,20 +1405,27 @@ def main(args):
                 if p.requires_grad:
                     task_param[n] = p.clone().detach()
 
-            # 3. calculate the importance matrix and get the regularization terms
-            importance = calculate_importance_ewc(model_without_ddp, data_loader_remain)
-            if (
-                args.online and len(regularization_terms) > 0
-            ):  # only have one importance matrix
-                regularization_terms[0] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+            if task_i < args.num_tasks - 1:
+                # 3. calculate the importance matrix and get the regularization terms
+                importance = calculate_importance_ewc(
+                    model_without_ddp, data_loader_remain
+                )
+                if (
+                    args.online and len(regularization_terms) > 0
+                ):  # only have one importance matrix
+                    regularization_terms[0] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
+                else:
+                    regularization_terms[task_i + 1] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
             else:
-                regularization_terms[task_i + 1] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+                print(
+                    "This is the last task, no need to calculate the importance matrix"
+                )
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -1600,7 +1648,7 @@ def main(args):
             if args.sgda_smoothing > 0:
                 print("smoothing with SGDA")
             start_time = time.time()
-            
+
             # reinitialize the optimizer
             if args.sgd:
                 optimizer = torch.optim.SGD(
@@ -1611,17 +1659,19 @@ def main(args):
                 )
             else:
                 optimizer = torch.optim.AdamW(
-                    param_dicts, lr=args.sgda_learning_rate, weight_decay=args.sgda_weight_decay
+                    param_dicts,
+                    lr=args.sgda_learning_rate,
+                    weight_decay=args.sgda_weight_decay,
                 )
-                
+
             # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop) # do not use lr_scheduler for SCRUB
-            
+
             epoch = 0
             for epoch in range(args.SCRUB_superepoch):
                 if args.distributed:
                     sampler_forget.set_epoch(epoch)
                     sampler_remain.set_epoch(epoch)
-            
+
                 train_stats = train_one_superepoch_SCRUB(
                     student_model=model,
                     teacher_model=teacher_model,
@@ -1640,7 +1690,7 @@ def main(args):
                     sgda_lr=args.sgda_learning_rate,
                     lr_decay_epochs=args.scrub_decay_epoch,
                 )
-                
+
                 print("SCRUB training. Testing for forget classes")
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model,
@@ -1658,7 +1708,7 @@ def main(args):
                     task_i=task_i,
                     epoch=epoch + 1,
                 )
-                
+
                 print("SCRUB training. Testing for remain classes")
                 test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
                     model,
@@ -1676,7 +1726,7 @@ def main(args):
                     task_i=task_i,
                     epoch=epoch + 1,
                 )
-                
+
                 if task_i > 0:
                     print("SCRUB training. Testing for old classes")
                     test_stats_old, coco_evaluator_old, old_maps = evaluate(
@@ -1695,14 +1745,14 @@ def main(args):
                         task_i=task_i,
                         epoch=epoch + 1,
                     )
-                    
+
             end_time = time.time()
             total_time = end_time - start_time
             total_time_str = str(datetime.timedelta(seconds=int(total_time)))
             print("Training time {}".format(total_time_str))
             if args.rank == 0:
                 wandb.log({"time": total_time_str})
-                
+
         if args.MAS:
             print("start mas training in task", task_i)
             start_time = time.time()
@@ -1871,18 +1921,25 @@ def main(args):
                 if p.requires_grad:
                     task_param[n] = p.clone().detach()
 
-            # 3. calculate the importance matrix and get the regularization terms
-            importance = calculate_importance_mas(model_without_ddp, data_loader_remain)
-            if args.online and len(regularization_terms) > 0:
-                regularization_terms[0] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+            if task_i < args.num_tasks - 1:
+                # 3. calculate the importance matrix and get the regularization terms
+                importance = calculate_importance_mas(
+                    model_without_ddp, data_loader_remain
+                )
+                if args.online and len(regularization_terms) > 0:
+                    regularization_terms[0] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
+                else:
+                    regularization_terms[task_i + 1] = {
+                        "importance": importance,
+                        "task_param": task_param,
+                    }
             else:
-                regularization_terms[task_i + 1] = {
-                    "importance": importance,
-                    "task_param": task_param,
-                }
+                print(
+                    "This is the last task, no need to calculate the importance matrix"
+                )
 
             end_time = time.time()
             total_time = end_time - start_time
@@ -1961,7 +2018,7 @@ if __name__ == "__main__":
                 + "-SCRUB"
             )
             if args.sgda_smoothing > 0:
-                wandb.run.name += "-smooth"+str(args.sgda_smoothing)
+                wandb.run.name += "-smooth" + str(args.sgda_smoothing)
         if args.retrain:
             wandb.run.name = (
                 "forget-start"
