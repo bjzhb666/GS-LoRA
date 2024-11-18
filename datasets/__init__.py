@@ -42,6 +42,10 @@ import torch
 
 
 class CLDatasetWrapper:
+    '''
+    CLDatasetWrapper is a wrapper for a dataset that changes the labels of the dataset to a fixed value 
+    (here is 12, a non-exist class id in COCO).
+    '''
     def __init__(self, dataset):
         self.dataset = dataset
 

@@ -21,11 +21,13 @@ import util.cal_norm as cal_norm
 import util.misc as utils
 from baselines.DERtrain import train_one_epoch_DER
 from baselines.FDRtrain import train_one_epoch_FDR
+from baselines.SCRUBtrain import train_one_superepoch_SCRUB
 from datasets import CLDatasetWrapper, build_dataset, get_coco_api_from_dataset
 from datasets.incremental import generate_cls_order
 from engine import evaluate
 from engine_cl import train_one_epoch_ewc, train_one_epoch_l2, train_one_epoch_mas
 from models import build_model
+import torch.nn as nn
 
 warnings.filterwarnings("ignore")
 
@@ -347,6 +349,7 @@ def get_args_parser():
     parser.add_argument(
         "--sgda_smoothing", default=0.0, type=float, help="smoothing factor for SGDA"
     )
+    parser.add_argument("--sgda_gamma", default=0.99, type=float, help="gamma for sgda")
     parser.add_argument(
         "--sgda_alpha", default=0.001, type=float, help="alpha for sgda"
     )
@@ -360,13 +363,13 @@ def get_args_parser():
         "--sgda_weight_decay", default=5e-4, type=float, help="weight_decay for sgda"
     )
     parser.add_argument(
-        "--SCRUB_superepoch", default=10, type=int, help="superepoch for sgda"
+        "--SCRUB_superepoch", default=3, type=int, help="superepoch for sgda"
     )
     parser.add_argument(
         "--kd_T", default=2.0, type=float, help="temperature for kd loss"
     )
     parser.add_argument(
-        "--scrub_decay_epoch", default=100, type=int, help="decay epoch for sgda"
+        "--scrub_decay_epoch", default=30, type=int, help="decay epoch for sgda"
     )
 
     # DER method
@@ -1592,6 +1595,114 @@ def main(args):
             if args.rank == 0:
                 wandb.log({"time": total_time_str})
 
+        if args.SCRUB:
+            print("start SCRUB training in task", task_i)
+            if args.sgda_smoothing > 0:
+                print("smoothing with SGDA")
+            start_time = time.time()
+            
+            # reinitialize the optimizer
+            if args.sgd:
+                optimizer = torch.optim.SGD(
+                    param_dicts,
+                    lr=args.sgda_learning_rate,
+                    momentum=args.sgda_momentum,
+                    weight_decay=args.sgda_weight_decay,
+                )
+            else:
+                optimizer = torch.optim.AdamW(
+                    param_dicts, lr=args.sgda_learning_rate, weight_decay=args.sgda_weight_decay
+                )
+                
+            # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop) # do not use lr_scheduler for SCRUB
+            
+            epoch = 0
+            for epoch in range(args.SCRUB_superepoch):
+                if args.distributed:
+                    sampler_forget.set_epoch(epoch)
+                    sampler_remain.set_epoch(epoch)
+            
+                train_stats = train_one_superepoch_SCRUB(
+                    student_model=model,
+                    teacher_model=teacher_model,
+                    swa_model=swa_model,
+                    criterion=criterion,
+                    data_loader_forget=data_loader_forget,
+                    data_loader_remain=data_loader_remain,
+                    optimizer=optimizer,
+                    device=device,
+                    superepoch=epoch,
+                    max_norm=args.clip_max_norm,
+                    kd_T=args.kd_T,
+                    sgda_smoothing=args.sgda_smoothing,
+                    sgda_alpha=args.sgda_alpha,
+                    sgda_gamma=args.sgda_gamma,
+                    sgda_lr=args.sgda_learning_rate,
+                    lr_decay_epochs=args.scrub_decay_epoch,
+                )
+                
+                print("SCRUB training. Testing for forget classes")
+                test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_forget,
+                    base_ds_forget,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=forget_maps,
+                    name="forget",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+                
+                print("SCRUB training. Testing for remain classes")
+                test_stats_remain, coco_evaluator_remain, remain_maps = evaluate(
+                    model,
+                    criterion,
+                    postprocessors,
+                    data_loader_val_remain,
+                    base_ds_remain,
+                    device,
+                    args.output_dir,
+                )
+                utils.log_wandb(
+                    args=args,
+                    array=remain_maps,
+                    name="remain",
+                    task_i=task_i,
+                    epoch=epoch + 1,
+                )
+                
+                if task_i > 0:
+                    print("SCRUB training. Testing for old classes")
+                    test_stats_old, coco_evaluator_old, old_maps = evaluate(
+                        model,
+                        criterion,
+                        postprocessors,
+                        data_loader_val_old,
+                        base_ds_old,
+                        device,
+                        args.output_dir,
+                    )
+                    utils.log_wandb(
+                        args=args,
+                        array=old_maps,
+                        name="old",
+                        task_i=task_i,
+                        epoch=epoch + 1,
+                    )
+                    
+            end_time = time.time()
+            total_time = end_time - start_time
+            total_time_str = str(datetime.timedelta(seconds=int(total_time)))
+            print("Training time {}".format(total_time_str))
+            if args.rank == 0:
+                wandb.log({"time": total_time_str})
+                
         if args.MAS:
             print("start mas training in task", task_i)
             start_time = time.time()
@@ -1823,14 +1934,34 @@ if __name__ == "__main__":
                 + str(args.cls_per_phase)
                 + "-mas"
             )
-        if args.si:
+        if args.FDR:
             wandb.run.name = (
                 "forget-start"
                 + str(args.num_of_first_cls)
                 + "-per"
                 + str(args.cls_per_phase)
-                + "-si"
+                + "-FDR"
             )
+        if args.Der:
+            wandb.run.name = (
+                "forget-start"
+                + str(args.num_of_first_cls)
+                + "-per"
+                + str(args.cls_per_phase)
+                + "-DER"
+            )
+            if args.DER_plus:
+                wandb.run.name += "++"
+        if args.SCRUB:
+            wandb.run.name = (
+                "forget-start"
+                + str(args.num_of_first_cls)
+                + "-per"
+                + str(args.cls_per_phase)
+                + "-SCRUB"
+            )
+            if args.sgda_smoothing > 0:
+                wandb.run.name += "-smooth"+str(args.sgda_smoothing)
         if args.retrain:
             wandb.run.name = (
                 "forget-start"
