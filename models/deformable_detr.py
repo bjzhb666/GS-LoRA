@@ -7,6 +7,7 @@ from util import box_ops
 from util.misc import (NestedTensor, nested_tensor_from_tensor_list,
                        accuracy, get_world_size, interpolate,
                        is_dist_avail_and_initialized, inverse_sigmoid)
+import util.misc as utils
 
 from .backbone import build_backbone
 from .matcher import build_matcher
@@ -210,7 +211,7 @@ class SetCriterion(nn.Module):
         1) we compute hungarian assignment between ground truth boxes and the outputs of the model
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
-    def __init__(self, num_classes, matcher, weight_dict, ref_weight_dict, forget_weight_dict, losses, focal_alpha=0.25):
+    def __init__(self, num_classes, matcher, weight_dict, ref_weight_dict, forget_weight_dict, losses, focal_alpha=0.25, prototype_dict=None):
         """ Create the criterion.
         Parameters:
             num_classes: number of object categories, omitting the special no-object category
@@ -228,24 +229,26 @@ class SetCriterion(nn.Module):
         self.forget_weight_dict = forget_weight_dict
         self.losses = losses
         self.focal_alpha = focal_alpha
+        self.prototype_dict = prototype_dict
 
     def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
         assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
+        src_logits = outputs['pred_logits'] # [bs, num_queries=300, num_classes+1=91]
 
         # _get_src_permutation_idx(indices)返回两个值batch_idx和src_idx
         # batch_idx得到的就是匈牙利算法得到的索引是属于哪一张图像,如tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1])
         # 前20属于第一张,最后两个属于第二张
         # src_idx则表示匈牙利算法得到的横坐标信息,如tensor([14, 20, 24, 28, 32, 37, 42, 46, 50, 52, 60, 64, 67, 70, 79, 87, 91, 93, 94, 97, 6, 31])
+        # src_idx 中的每个值表示预测边界框的索引。具体来说，src_idx 中的每个元素是一个整数，表示预测边界框在预测结果中的位置。也就是对应具体query的位置
         # idx = (batch_idx,src_idx)
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)]) # batch内所有目标的标签拼接到一起
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
-        target_classes[idx] = target_classes_o
+                                    dtype=torch.int64, device=src_logits.device) # [bs, num_queries] 初始值全部设置为 self.num_classes=91
+        target_classes[idx] = target_classes_o # target_classes 中的匹配索引位置的值替换为 target_classes_o。这一步确保了 target_classes 中的值对应于实际的目标标签。
 
         target_classes_onehot = torch.zeros([src_logits.shape[0], src_logits.shape[1], src_logits.shape[2] + 1],
                                             dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
@@ -327,6 +330,23 @@ class SetCriterion(nn.Module):
         }
         return losses
 
+    def loss_embedding(self, outputs, targets, indices, num_boxes):
+        """Compute the loss related to the embeddings
+           targets dicts must contain the key "embeddings" containing a tensor of dim [nb_target_boxes, hidden_dim]
+        """
+        assert "embeddings" in outputs
+        src_embeddings = outputs["embeddings"]
+        idx = self._get_src_permutation_idx(indices)
+        
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)]) # batch内所有目标的标签拼接到一起 # torch.Size([num_real_objects])
+        selected_embeddings = src_embeddings[idx] # (num_real_objects, hidden_dim)
+        loss_embedding = get_prototype_loss(selected_embeddings, target_classes_o, self.prototype_dict)
+        
+        losses = {"loss_embedding": loss_embedding}
+        
+        return losses
+    
+        
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
@@ -344,7 +364,8 @@ class SetCriterion(nn.Module):
             'labels': self.loss_labels,
             'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
-            'masks': self.loss_masks
+            'masks': self.loss_masks,
+            'embedding': self.loss_embedding,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
         return loss_map[loss](outputs, targets, indices, num_boxes, **kwargs)
@@ -412,6 +433,41 @@ class SetCriterion(nn.Module):
                     losses.update(l_dict)
 
         return losses
+
+
+def get_prototype_loss(output, labels, prototype_dict, distance="kl"):
+    """
+    计算 prototype 的损失，将每个样本的特征拉近到其对应类别的 prototype。
+
+    参数:
+    - features (torch.Tensor): 特征张量，形状为 (batch_size, d)，其中 d 是特征维度。
+    - labels (torch.Tensor): 样本标签，形状为 (batch_size,)。
+    - prototype_dict (dict): 字典，其中 key 是类别 label，value 是相应类别的 prototype 向量。
+    - distance (str): 距离度量方式，可选 'euclidean' 或 'kl'。
+
+    返回:
+    - loss (torch.Tensor): 计算得到的 prototype loss。
+    """
+    loss = 0.0
+    # import pdb; pdb.set_trace()
+    # 将每个标签对应的 prototype 取出组成一个张量
+    prototype_tensor = torch.stack(
+        [prototype_dict[label.item()] for label in labels]
+    ).to(
+        output.device
+    )  # (batch_size, d)
+
+    if distance == "l2":
+        loss = torch.mean((output - prototype_tensor) ** 2)
+    elif distance == "kl":
+        # import pdb; pdb.set_trace()
+        features_log = F.log_softmax(output, dim=1)
+        prototype_log = F.log_softmax(prototype_tensor, dim=1)
+        loss = F.kl_div(
+            features_log, prototype_log, reduction="batchmean", log_target=True
+        )
+
+    return loss
 
 
 class PostProcess(nn.Module):
@@ -554,6 +610,19 @@ def build(args):
     # num_classes, matcher, weight_dict, losses, focal_alpha=0.25
     criterion = SetCriterion(num_classes, matcher, weight_dict, ref_weight_dict, forget_weight_dict, losses, focal_alpha=args.focal_alpha)
     criterion.to(device)
+    if args.prototype:
+        # calculate the prototype (here we use cls FFN) for each class
+        pretrained_model = copy.deepcopy(model)
+        # load the pretrained model
+        if args.resume:
+            checkpoint = torch.load(args.resume, map_location="cpu")
+            pretrained_model.load_state_dict(checkpoint["model"], strict=False)
+        # get the prototype for each class
+        prototype_dict = utils.get_prototype_dict(pretrained_model)
+        embedding_weight_dict = {"loss_embedding": args.pro_f_weight}
+        criterion_embedding = SetCriterion(num_classes, matcher, embedding_weight_dict, ref_weight_dict, 
+                                           forget_weight_dict, ["embedding"], focal_alpha=args.focal_alpha, prototype_dict=prototype_dict)
+    
     postprocessors = {'bbox': PostProcess()}
     if args.masks:
         postprocessors['segm'] = PostProcessSegm()
@@ -561,4 +630,7 @@ def build(args):
             is_thing_map = {i: i <= 90 for i in range(201)}
             postprocessors["panoptic"] = PostProcessPanoptic(is_thing_map, threshold=0.85)
 
-    return model, criterion, postprocessors
+    if args.prototype:
+        return model, criterion, postprocessors, criterion_embedding
+    else:
+        return model, criterion, postprocessors

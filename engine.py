@@ -375,73 +375,6 @@ def train_one_epoch_forget_remain(
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
-"""
-    for _ in metric_logger.log_every(range(len(data_loader_forget)), print_freq, header):
-        outputs_forget = model(samples_forget)
-        loss_dict_forget = criterion(outputs_forget, targets_forget)
-        weight_dict_forget = criterion.weight_dict
-        losses_forget = sum(loss_dict_forget[k] * weight_dict_forget[k] for k in loss_dict_forget.keys() if k in weight_dict_forget)   
-        losses_forget = -losses_forget # gradient ascent
-
-        outputs_remain = model(samples_remain)
-        loss_dict_remain = criterion(outputs_remain, targets_remain)
-        weight_dict_remain = criterion.weight_dict
-        losses_remain = sum(loss_dict_remain[k] * weight_dict_remain[k] for k in loss_dict_remain.keys() if k in weight_dict_remain)
-
-        losses_total = beta * losses_forget + losses_remain
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced_forget = utils.reduce_dict(loss_dict_forget)
-        loss_dict_reduced_unscaled_forget = {f'{k}_unscaled': v
-                                        for k, v in loss_dict_reduced_forget.items()}
-        loss_dict_reduced_scaled_forget = {k: v * weight_dict_forget[k]
-                                        for k, v in loss_dict_reduced_forget.items() if k in weight_dict_forget}
-        losses_reduced_scaled_forget = sum(loss_dict_reduced_scaled_forget.values())
-
-        loss_dict_reduced_remain = utils.reduce_dict(loss_dict_remain)
-        loss_dict_reduced_unscaled_remain = {f'{k}_unscaled': v
-                                        for k, v in loss_dict_reduced_remain.items()}
-        loss_dict_reduced_scaled_remain = {k: v * weight_dict_remain[k]
-                                        for k, v in loss_dict_reduced_remain.items() if k in weight_dict_remain}
-        losses_reduced_scaled_remain = sum(loss_dict_reduced_scaled_remain.values())
-
-        loss_value = losses_reduced_scaled_forget.item() * beta + losses_reduced_scaled_remain.item()
-
-        if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
-            print(loss_dict_reduced_forget)
-            print(loss_dict_reduced_remain)
-            sys.exit(1)
-        
-        optimizer.zero_grad()
-        losses_total.backward()
-        if max_norm > 0:
-            grad_total_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-        else:
-            grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
-        optimizer.step()
-
-        metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled_forget, **loss_dict_reduced_scaled_remain)
-        metric_logger.update(forget_class_error=loss_dict_reduced_forget['class_error'])
-        metric_logger.update(remain_class_error=loss_dict_reduced_remain['class_error'])
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(grad_norm=grad_total_norm)
-
-        samples_forget, targets_forget = prefetcher_forget.next()
-        samples_remain, targets_remain = prefetcher_remain.next()
-        
-        if samples_remain is None:
-            prefetcher_remain = data_prefetcher(data_loader_remain, device, prefetch=True)
-            samples_remain, targets_remain = prefetcher_remain.next()
-        elif samples_forget is None:
-            prefetcher_forget = data_prefetcher(data_loader_forget, device, prefetch=True)
-            samples_forget, targets_forget = prefetcher_forget.next()
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger)
-    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-"""
-
-
 def train_one_epoch_forget_cls(
     model: torch.nn.Module,
     criterion: torch.nn.Module,
@@ -454,7 +387,7 @@ def train_one_epoch_forget_cls(
     beta: float = 0.5,
     alpha: float = 0.5,
     use_prototype: bool = False,
-    prototype_dict: dict=None,
+    criterion_embedding = None,
     prototype_weight_forget: float=0.0,
     prototype_weight_remain: float=0.0,
 ):
@@ -463,6 +396,8 @@ def train_one_epoch_forget_cls(
     """
     model.train()
     criterion.train()
+    if criterion_embedding is not None:
+        criterion_embedding.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", utils.SmoothedValue(window_size=1, fmt="{value:.6f}"))
     metric_logger.add_meter(
@@ -479,7 +414,8 @@ def train_one_epoch_forget_cls(
 
     prefetcher_forget = data_prefetcher(data_loader_forget, device, prefetch=True)
     samples_forget, targets_forget = prefetcher_forget.next()
-
+    # targets_forget is a list with length of batch_size, 
+    # each element is a dict with keys: 'boxes', 'labels', 'image_id', 'area', 'iscrowd', 'orig_size', 'size'
     prefetcher_remain = data_prefetcher(data_loader_remain, device, prefetch=True)
     samples_remain, targets_remain = prefetcher_remain.next()
 
@@ -496,6 +432,9 @@ def train_one_epoch_forget_cls(
         )
 
         outputs_forget = model(samples_forget)
+        # outputs_forget is a dict with keys: 'pred_logits', 'pred_boxes', 'embeddings',
+        # embeddings is the output of the transformer decoder, shape is (batch_size, num_queries=300, dim=256)
+        # import pdb; pdb.set_trace()
         loss_dict_forget = criterion(outputs_forget, targets_forget)
         weight_dict_forget = criterion.forget_weight_dict
         losses_forget = 0
@@ -510,19 +449,27 @@ def train_one_epoch_forget_cls(
                     losses_forget += loss_dict_forget[k] * weight_dict_forget[k]
         # losses_forget = sum(loss_dict_forget[k] * weight_dict_forget[k] for k in loss_dict_forget.keys() if k in weight_dict_forget)
         structure_loss = group_sparse_loss(model)
-        import pdb; pdb.set_trace()
+        
         if use_prototype:
-            prototype_loss_forget = get_prototype_loss(output=outputs_forget['embeddings'], labels=targets_forget, prototype_dict=prototype_dict)
-            prototype_loss_remain = get_prototype_loss(output=outputs_remain['embeddings'], labels=targets_remain, prototype_dict=prototype_dict)
+            prototype_loss_forget = criterion_embedding(outputs_forget, targets_forget)
+            prototype_loss_remain = criterion_embedding(outputs_remain, targets_remain)
             prototype_loss = (
                 prototype_weight_forget
-                * torch.functional.F.relu(18 - prototype_loss_forget)
-                + prototype_weight_remain * prototype_loss_remain
+                * torch.functional.F.relu(18 - prototype_loss_forget["loss_embedding"])
+                + prototype_weight_remain * prototype_loss_remain["loss_embedding"]
             )
+            # import pdb; pdb.set_trace()
+            # reduce losses over all GPUs for logging purposes
+            reduced_dict_prototype_loss_forget = utils.reduce_dict(prototype_loss_forget)
+            reduced_dict_prototype_loss_remain = utils.reduce_dict(prototype_loss_remain)
+            scaled_prototype_loss_forget = reduced_dict_prototype_loss_forget["loss_embedding"] * prototype_weight_forget
+            scaled_prototype_loss_remain = reduced_dict_prototype_loss_remain["loss_embedding"] * prototype_weight_remain
         else:
             prototype_loss_forget = torch.tensor(0.0).to(device)
             prototype_loss_remain = torch.tensor(0.0).to(device)
             prototype_loss = torch.tensor(0.0).to(device)
+            scaled_prototype_loss_forget = torch.tensor(0.0).to(device)
+            scaled_prototype_loss_remain = torch.tensor(0.0).to(device)
         
         losses_total = beta * losses_forget + losses_remain + alpha * structure_loss + prototype_loss
 
@@ -580,6 +527,8 @@ def train_one_epoch_forget_cls(
             loss_forget=losses_reduced_scaled_forget.item(),
             loss_remain=losses_reduced_scaled_remain.item(),
             loss_structure=structure_loss.item(),
+            prototype_loss_forget=scaled_prototype_loss_forget.item(),
+            prototype_loss_remain=scaled_prototype_loss_remain.item(),
             **loss_dict_reduced_scaled_forget,
             **loss_dict_reduced_unscaled_forget,
             **loss_dict_reduced_scaled_remain,
@@ -718,7 +667,10 @@ def evaluate(
 
 
 def group_sparse_loss(model: torch.nn.Module, type="layer"):
-    model_without_ddp = model.module
+    if hasattr(model, 'module'):
+        model_without_ddp = model.module
+    else:
+        model_without_ddp = model
     learnable_params_name = [
         n for n, p in model_without_ddp.named_parameters() if p.requires_grad
     ]
@@ -817,38 +769,3 @@ def group_sparse_loss(model: torch.nn.Module, type="layer"):
         group_sparse_loss += group_sparse_multi_module(group_param)
     # print('group_sparse_loss', group_sparse_loss)
     return group_sparse_loss
-
-
-def get_prototype_loss(output, labels, prototype_dict, distance="kl"):
-    """
-    计算 prototype 的损失，将每个样本的特征拉近到其对应类别的 prototype。
-
-    参数:
-    - features (torch.Tensor): 特征张量，形状为 (batch_size, d)，其中 d 是特征维度。
-    - labels (torch.Tensor): 样本标签，形状为 (batch_size,)。
-    - prototype_dict (dict): 字典，其中 key 是类别 label，value 是相应类别的 prototype 向量。
-    - distance (str): 距离度量方式，可选 'euclidean' 或 'kl'。
-
-    返回:
-    - loss (torch.Tensor): 计算得到的 prototype loss。
-    """
-    loss = 0.0
-    # import pdb; pdb.set_trace()
-    # 将每个标签对应的 prototype 取出组成一个张量
-    prototype_tensor = torch.stack(
-        [prototype_dict[label.item()] for label in labels]
-    ).to(
-        output.device
-    )  # (batch_size, d)
-
-    if distance == "l2":
-        loss = torch.mean((output - prototype_tensor) ** 2)
-    elif distance == "kl":
-        # import pdb; pdb.set_trace()
-        features_log = F.log_softmax(output, dim=1)
-        prototype_log = F.log_softmax(prototype_tensor, dim=1)
-        loss = F.kl_div(
-            features_log, prototype_log, reduction="batchmean", log_target=True
-        )
-
-    return loss

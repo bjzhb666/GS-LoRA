@@ -29,7 +29,8 @@ from collections import OrderedDict
 import util.cal_norm as cal_norm
 import torch.distributed as dist
 from baselines.random_drop import random_drop_weights
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="torch.functional")
 
 def get_args_parser():
     parser = argparse.ArgumentParser("Deformable DETR Detector", add_help=False)
@@ -233,6 +234,7 @@ def get_args_parser():
     parser.add_argument("--method", default="icarl", choices=["baseline", "icarl"])
 
     parser.add_argument("--debug_mode", default=False, action="store_true")
+    parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--balanced_ft", default=False, action="store_true")
     parser.add_argument("--eval", action="store_true")
 
@@ -390,8 +392,11 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
-
-    model, criterion, postprocessors = build_model(args)
+    if not args.prototype:
+        model, criterion, postprocessors = build_model(args)
+        criterion_embedding = None
+    else:
+        model, criterion, postprocessors, criterion_embedding = build_model(args)
     model.to(device)
 
     if "None" not in args.lora_pos:
@@ -422,14 +427,7 @@ def main(args):
 
     origin_first_task_cls = args.num_of_first_cls
 
-    # calculate the prototype (here we use cls FFN) for each class
-    pretrained_model = copy.deepcopy(model_without_ddp)
-    # load the pretrained model
-    if args.resume:
-        checkpoint = torch.load(args.resume, map_location="cpu")
-        pretrained_model.load_state_dict(checkpoint["model"], strict=False)
-    # get the prototype for each class
-    prototype_dict = utils.get_prototype_dict(pretrained_model)
+
 
     for task_i in range(args.num_tasks):  # start from 0
         # modify num_of_first_cls according to task id
@@ -753,7 +751,7 @@ def main(args):
                     else:
                         pass
             # check the resumed model
-            if not args.eval:
+            if not args.eval and not args.debug:
                 print("Testing for forget classes")
                 test_stats_forget, coco_evaluator_forget, forget_maps = evaluate(
                     model,
@@ -857,6 +855,10 @@ def main(args):
                     max_norm=args.clip_max_norm,
                     beta=cl_beta,
                     alpha=args.alpha,
+                    use_prototype=args.prototype,
+                    criterion_embedding=criterion_embedding,
+                    prototype_weight_forget=args.pro_f_weight,
+                    prototype_weight_remain=args.pro_r_weight,
                 )
                 lr_scheduler_forget.step()
 

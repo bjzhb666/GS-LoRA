@@ -611,6 +611,6 @@ def get_prototype_dict(model):
     key是原型的索引，value是原型的特征向量。
     '''
     FFN_weights = model.class_embed[-1].weight
-    prototype_dict = {i: FFN_weights[:, i] for i in range(FFN_weights.size(1))}
+    prototype_dict = {i: FFN_weights[i, :] for i in range(FFN_weights.size(0))}
     
     return prototype_dict
