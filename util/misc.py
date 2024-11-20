@@ -603,3 +603,14 @@ def reinitialize_lora_parameters(model):
                         nn.init.zeros_(param)
                 else:
                     raise ValueError(f"Parameter {name} is not an instance of nn.Parameter.")
+                
+
+def get_prototype_dict(model):
+    '''
+    get_prototype_dict()函数用于获取模型的原型字典。
+    key是原型的索引，value是原型的特征向量。
+    '''
+    FFN_weights = model.class_embed[-1].weight
+    prototype_dict = {i: FFN_weights[:, i] for i in range(FFN_weights.size(1))}
+    
+    return prototype_dict

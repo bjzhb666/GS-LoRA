@@ -15,6 +15,7 @@ from datasets.data_prefetcher import data_prefetcher
 import numpy as np
 import torch.distributed as dist
 import wandb
+import torch.nn.functional as F
 
 
 def train_one_epoch_incremental(
@@ -452,6 +453,10 @@ def train_one_epoch_forget_cls(
     max_norm: float = 0,
     beta: float = 0.5,
     alpha: float = 0.5,
+    use_prototype: bool = False,
+    prototype_dict: dict=None,
+    prototype_weight_forget: float=0.0,
+    prototype_weight_remain: float=0.0,
 ):
     """
     only use negative cls loss to train the model when forgetting, do not negative the bbox loss
@@ -505,7 +510,21 @@ def train_one_epoch_forget_cls(
                     losses_forget += loss_dict_forget[k] * weight_dict_forget[k]
         # losses_forget = sum(loss_dict_forget[k] * weight_dict_forget[k] for k in loss_dict_forget.keys() if k in weight_dict_forget)
         structure_loss = group_sparse_loss(model)
-        losses_total = beta * losses_forget + losses_remain + alpha * structure_loss
+        import pdb; pdb.set_trace()
+        if use_prototype:
+            prototype_loss_forget = get_prototype_loss(output=outputs_forget['embeddings'], labels=targets_forget, prototype_dict=prototype_dict)
+            prototype_loss_remain = get_prototype_loss(output=outputs_remain['embeddings'], labels=targets_remain, prototype_dict=prototype_dict)
+            prototype_loss = (
+                prototype_weight_forget
+                * torch.functional.F.relu(18 - prototype_loss_forget)
+                + prototype_weight_remain * prototype_loss_remain
+            )
+        else:
+            prototype_loss_forget = torch.tensor(0.0).to(device)
+            prototype_loss_remain = torch.tensor(0.0).to(device)
+            prototype_loss = torch.tensor(0.0).to(device)
+        
+        losses_total = beta * losses_forget + losses_remain + alpha * structure_loss + prototype_loss
 
         # reduce losses over all GPUs for logging purposes
         loss_dict_reduced_forget = utils.reduce_dict(loss_dict_forget)
@@ -798,3 +817,38 @@ def group_sparse_loss(model: torch.nn.Module, type="layer"):
         group_sparse_loss += group_sparse_multi_module(group_param)
     # print('group_sparse_loss', group_sparse_loss)
     return group_sparse_loss
+
+
+def get_prototype_loss(output, labels, prototype_dict, distance="kl"):
+    """
+    计算 prototype 的损失，将每个样本的特征拉近到其对应类别的 prototype。
+
+    参数:
+    - features (torch.Tensor): 特征张量，形状为 (batch_size, d)，其中 d 是特征维度。
+    - labels (torch.Tensor): 样本标签，形状为 (batch_size,)。
+    - prototype_dict (dict): 字典，其中 key 是类别 label，value 是相应类别的 prototype 向量。
+    - distance (str): 距离度量方式，可选 'euclidean' 或 'kl'。
+
+    返回:
+    - loss (torch.Tensor): 计算得到的 prototype loss。
+    """
+    loss = 0.0
+    # import pdb; pdb.set_trace()
+    # 将每个标签对应的 prototype 取出组成一个张量
+    prototype_tensor = torch.stack(
+        [prototype_dict[label.item()] for label in labels]
+    ).to(
+        output.device
+    )  # (batch_size, d)
+
+    if distance == "l2":
+        loss = torch.mean((output - prototype_tensor) ** 2)
+    elif distance == "kl":
+        # import pdb; pdb.set_trace()
+        features_log = F.log_softmax(output, dim=1)
+        prototype_log = F.log_softmax(prototype_tensor, dim=1)
+        loss = F.kl_div(
+            features_log, prototype_log, reduction="batchmean", log_target=True
+        )
+
+    return loss

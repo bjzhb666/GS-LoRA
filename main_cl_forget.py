@@ -346,6 +346,17 @@ def get_args_parser():
     parser.add_argument("--few_shot", default=False, action="store_true")
     parser.add_argument("--few_shot_num", default=8, type=int)
 
+    # prototype loss
+    parser.add_argument(
+        "--prototype", default=False, action="store_true", help="add prototype loss"
+    )
+    parser.add_argument(
+        "--pro_f_weight", type=float, default=0.0, help="prototype loss weight"
+    )
+    parser.add_argument(
+        "--pro_r_weight", type=float, default=0.0, help="prototype loss margin"
+    )
+
     return parser
 
 
@@ -410,6 +421,15 @@ def main(args):
         raise ValueError("Please set the correct data setting.")
 
     origin_first_task_cls = args.num_of_first_cls
+
+    # calculate the prototype (here we use cls FFN) for each class
+    pretrained_model = copy.deepcopy(model_without_ddp)
+    # load the pretrained model
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location="cpu")
+        pretrained_model.load_state_dict(checkpoint["model"], strict=False)
+    # get the prototype for each class
+    prototype_dict = utils.get_prototype_dict(pretrained_model)
 
     for task_i in range(args.num_tasks):  # start from 0
         # modify num_of_first_cls according to task id
