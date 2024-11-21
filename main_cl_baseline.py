@@ -392,6 +392,18 @@ def get_args_parser():
     # few shot setting
     parser.add_argument("--few_shot", default=False, action="store_true")
     parser.add_argument("--few_shot_num", default=8, type=int)
+    
+    # prototype loss
+    parser.add_argument(
+        "--prototype", default=False, action="store_true", help="add prototype loss"
+    )
+    parser.add_argument(
+        "--pro_f_weight", type=float, default=0.0, help="prototype loss weight"
+    )
+    parser.add_argument(
+        "--pro_r_weight", type=float, default=0.0, help="prototype loss margin"
+    )
+
     return parser
 
 
