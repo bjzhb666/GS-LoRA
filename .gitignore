@@ -36,7 +36,6 @@ reconstruct/
 train/debug.py
 debug_list.py
 
-scripts/run.sh
-scripts/run_sensecore.sh
 scripts/debug.py
 scripts/run_gen.sh
+scripts/run_forget_open.sh
