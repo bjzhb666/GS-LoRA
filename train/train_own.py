@@ -261,7 +261,6 @@ if __name__ == "__main__":
         f.write(str(cfg))
     print("=" * 60)
 
-    wandb.login(key="808d6ef02f3a9c448c5641c132830eb0c3c83c2a")
     wandb.init(
         project="face recognition",
         group="casia100",
