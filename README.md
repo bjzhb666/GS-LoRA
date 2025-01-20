@@ -155,6 +155,14 @@ If you find this project useful in your research, please consider citing:
   journal={arXiv preprint arXiv:2403.11530},
   year={2024}
 }
+
+@article{zhao2025practical,
+  title={Practical Continual Forgetting for Pre-trained Vision Models},
+  author={Zhao, Hongbo and Zhu, Fei and Ni, Bolin and Zhu, Feng and Meng, Gaofeng and Zhang, Zhaoxiang},
+  journal={arXiv preprint arXiv:2501.09705},
+  year={2025}
+}
+
 ```
 
 ## Contact
