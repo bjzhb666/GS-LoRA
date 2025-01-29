@@ -1,4 +1,4 @@
-# Continual Forgetting for Pre-trained Vision Models (CVPR2024)
+# Continual Forgetting for Pre-trained Vision Models (CVPR 2024)
 
 ![1735645758635](image/README/1735645758635.png)
 
@@ -75,6 +75,7 @@ Note: CASIA-100 is a subdataset from  [CASIA-WebFace](https://paperswithcode.com
 ##### c.2 ImageNet100 dataset
 
 We get ImageNet100 dataset from [ImageNet100](https://www.kaggle.com/datasets/ambityga/imagenet100).
+We get imagenet_classes.txt from [pytorch](https://github.com/pytorch/hub/blob/master/imagenet_classes.txt).
 
 ##### c.3 Final File structure
 
