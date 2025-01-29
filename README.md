@@ -74,7 +74,9 @@ Note: CASIA-100 is a subdataset from  [CASIA-WebFace](https://paperswithcode.com
 
 ##### c.2 ImageNet100 dataset
 
-We get ImageNet100 dataset from [ImageNet100](https://www.kaggle.com/datasets/ambityga/imagenet100).
+We get ImageNet100 dataset from [ImageNet100](https://www.kaggle.com/datasets/ambityga/imagenet100). 
+Then we should change the folders' names. Please refer to this post for details: [https://github.com/bjzhb666/GS-LoRA/issues/4#issuecomment-2621800559](https://github.com/bjzhb666/GS-LoRA/issues/4#issuecomment-2621800559).
+
 We get imagenet_classes.txt from [pytorch](https://github.com/pytorch/hub/blob/master/imagenet_classes.txt).
 
 ##### c.3 Final File structure
