@@ -601,7 +601,7 @@ def main(args):
     output_dir = Path(args.output_dir)
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-    # 如果args.resume为True，且rehearsal_training为False，则加载预训练模型
+    # If args.resume is True and rehearsal_training is False the pre-training model is loaded
     if args.resume:
         if args.resume.startswith("https"):
             checkpoint = torch.hub.load_state_dict_from_url(

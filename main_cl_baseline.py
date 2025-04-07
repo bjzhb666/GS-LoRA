@@ -839,7 +839,7 @@ def main(args):
         output_dir = Path(args.output_dir)
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-        # 如果args.resume为True，且为第一个任务，则加载预训练模型
+        # If `args.resume` is `True` and it is the first task, then load the pre-trained model.
         if args.resume and task_i == 0:
             if args.resume.startswith("https"):
                 checkpoint = torch.hub.load_state_dict_from_url(
@@ -1447,7 +1447,7 @@ def main(args):
                 wandb.log({"time": total_time_str})
 
         if args.Der:
-            #  如果模型只用于推理，不需要 DDP，teacher model不需要
+            # If the model is only used for inference, no DDP is needed, and the teacher model does not
             if args.DER_plus:
                 print("start DER++ training in task", task_i)
             else:
@@ -1810,7 +1810,7 @@ def main(args):
 
                     model.eval()
 
-                    # 网络输出logits的L2范数的平方作为loss，对其求偏导，得到梯度
+                    # The squared L2 norm of logits is output by the network as a loss, and the gradient is obtained by differentiating it
                     for i, (samples, targets) in enumerate(dataloader):
                         samples = samples.to(device)
                         targets = [

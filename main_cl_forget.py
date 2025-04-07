@@ -30,7 +30,9 @@ import util.cal_norm as cal_norm
 import torch.distributed as dist
 from baselines.random_drop import random_drop_weights
 import warnings
+
 warnings.filterwarnings("ignore", category=UserWarning, module="torch.functional")
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser("Deformable DETR Detector", add_help=False)
@@ -427,8 +429,6 @@ def main(args):
 
     origin_first_task_cls = args.num_of_first_cls
 
-
-
     for task_i in range(args.num_tasks):  # start from 0
         # modify num_of_first_cls according to task id
         print("\n")
@@ -686,7 +686,7 @@ def main(args):
         output_dir = Path(args.output_dir)
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
 
-        # 如果args.resume为True，且rehearsal_training为False，则加载预训练模型
+        # If args.resume is True and rehearsal_training is False the pre-training model is loaded
         if args.resume:
             if args.resume.startswith("https"):
                 checkpoint = torch.hub.load_state_dict_from_url(
@@ -1335,6 +1335,14 @@ if __name__ == "__main__":
                 + "-per"
                 + str(args.cls_per_phase)
                 + "-one-stage"
+            )
+        if args.prototype:
+            wandb.run.name = (
+                "forget-start"
+                + str(args.num_of_first_cls)
+                + "-per"
+                + str(args.cls_per_phase)
+                + "-prototype"
             )
         if args.eval:
             wandb.run.name = "eval-" + wandb.run.name

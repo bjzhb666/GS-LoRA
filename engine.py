@@ -64,7 +64,6 @@ def train_one_epoch_incremental(
             if k in ref_weight_dict
         )
 
-        # 蒸馏策略的改进，先用旧模型产生伪标签，然后将伪标签加入到新标签中，再用新模型训练（样本层面的蒸馏，而不再是logits的蒸馏）
         for img_idx in range(len(targets)):
             include_list = []
             for ref_box_idx in range(len(ref_results[img_idx]["boxes"])):
@@ -78,7 +77,7 @@ def train_one_epoch_incremental(
                         box_ops.box_cxcywh_to_xyxy(this_ref_box),
                         box_ops.box_cxcywh_to_xyxy(this_target_box),
                     )
-                    if iou >= 0.7:  # 伪标签与新标签的iou大于0.7，不加入
+                    if iou >= 0.7: 
                         include_this_pseudo_label = False
                 include_list.append(include_this_pseudo_label)
 
@@ -96,10 +95,10 @@ def train_one_epoch_incremental(
                 ),
                 0,
             )
-            # 该代码将具有include_list中为True的目标框和标签连接起来，从而创建一个包含伪标签的新targets列表。
+            # This code concatenates the target boxes and labels that are True in include_list, thereby creating a new targets list that includes pseudo-labels.
         loss_dict = criterion(
             outputs, targets
-        )  # 直接将新旧标签混合后的targets传入，计算损失，相当于Ldetr+Lkd
+        )  # Pass the mixed targets of the new and old labels directly into it, calculate the loss, which is equivalent to Ldetr+Lkd
         weight_dict = criterion.weight_dict
         losses = sum(
             loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict

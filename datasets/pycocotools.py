@@ -55,7 +55,7 @@ class COCO:
         self.dataset, self.anns, self.cats, self.imgs = dict(), dict(), dict(), dict()
         self.imgToAnns, self.catToImgs = defaultdict(list), defaultdict(
             list
-        )  # 创建一个默认值为列表的字典
+        ) 
         self.is_train = is_train
 
         if not annotation_file == None:
@@ -261,7 +261,7 @@ class COCO:
                             if ann["category_id"] in selected_cls_this_phase:
                                 imgToAnns[ann["image_id"]].append(
                                     ann
-                                )  # 如果ann['image_id']多个符合条件的category_id，当前的image_id就会多次append
+                                )  # If ann['image_id'] does meet a condition, the current image_id is appended several times
                                 anns[ann["id"]] = ann
                                 catToImgs[ann["category_id"]].append(ann["image_id"])
                     print("finishing annotation dict...")

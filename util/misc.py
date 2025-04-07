@@ -395,19 +395,19 @@ def get_rank():
 
 def get_local_size():
     '''
-    在分布式训练中，'LOCAL_SIZE'环境变量通常用于指示每个进程/节点的本地GPU数量。
-    get_local_size()函数是用来获取当前节点的本地GPU数量的。'''
+    In distributed training, the 'LOCAL_SIZE' environment variable is often used to indicate the number of local Gpus per process/node.
+    The get_local_size() function is used to get the number of local Gpus on the current node。'''
     if not is_dist_avail_and_initialized():
         return 1
     return int(os.environ['LOCAL_SIZE'])
 
 
 def get_local_rank():
-    '''
-    get_local_rank()函数是用来获取当前进程在本地节点中的rank值的。
-    如果当前进程不是分布式环境或者分布式环境没有初始化，则返回0。
-    如果是分布式环境且已经初始化，则返回环境变量LOCAL_RANK的值，
-    即当前进程在本地节点中的rank值。'''
+    """
+    The get_local_rank() function is used to obtain the rank of the current process in the local node.
+    If the current process is not a distributed environment or the distributed environment has not been initialized, 0 is returned.
+    If the environment is distributed and initialized, return the value of the environment variable LOCAL_RANK,
+    It is the rank of the current process on the local node. """
     if not is_dist_avail_and_initialized():
         return 0
     return int(os.environ['LOCAL_RANK'])
@@ -592,7 +592,6 @@ def log_wandb(args, array, name, task_i, epoch):
             })
 
 def reinitialize_lora_parameters(model):
-    # 取消梯度计算
     with torch.no_grad():
         for name, param in model.named_parameters():
             if 'lora' in name:

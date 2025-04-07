@@ -12,8 +12,9 @@ for beta in 0.015; do
                         --lora_rank ${LORA_RANK} --lora_pos encoder decoder --epoch 30 --lr $lr --cache_mode \
                         --lora_encoder_layers 0 1 2 3 4 5 --lora_decoder_layers 0 1 2 3 4 5 --beta $beta --num_of_first_cls $NUM_FIRST_CLS --cls_per_phase $CLS_PER_PHASE --no_aux_loss \
                         --lora_reg_rank 0 --lora_cls_rank 0 --alpha $alpha --seed_cls 123 \
-                        --num_tasks 7 --cl_beta_list 0.015 0.03 0.14 0.13 0.13 0.15 0.15 \
-                         --wandb_offline  --few_shot --few_shot_num 20
+                        --num_tasks 7 --cl_beta_list 0.15 0.15 0.35 0.6 0.15 0.2 0.2 \
+                        --few_shot --few_shot_num 32 \
+                        --prototype --pro_f_weight 0.005 --pro_r_weight 0.00
         done
 done
 

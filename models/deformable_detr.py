@@ -238,17 +238,17 @@ class SetCriterion(nn.Module):
         assert 'pred_logits' in outputs
         src_logits = outputs['pred_logits'] # [bs, num_queries=300, num_classes+1=91]
 
-        # _get_src_permutation_idx(indices)返回两个值batch_idx和src_idx
-        # batch_idx得到的就是匈牙利算法得到的索引是属于哪一张图像,如tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1])
-        # 前20属于第一张,最后两个属于第二张
-        # src_idx则表示匈牙利算法得到的横坐标信息,如tensor([14, 20, 24, 28, 32, 37, 42, 46, 50, 52, 60, 64, 67, 70, 79, 87, 91, 93, 94, 97, 6, 31])
-        # src_idx 中的每个值表示预测边界框的索引。具体来说，src_idx 中的每个元素是一个整数，表示预测边界框在预测结果中的位置。也就是对应具体query的位置
+        # _get_src_permutation_idx(indices) returns two values batch_idx and src_idx
+        # batch_idx gets which image the index from the Hungarian algorithm belongs to, such as tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1])
+        # The first 20 belong to the first sheet, the last two belong to the second sheet
+        # src_idx represents the horizontal coordinate information obtained by the Hungarian algorithm, such as tensor([14, 20, 24, 28, 32, 37, 42, 46, 50, 52, 60, 64, 67, 70, 79, 87, 91, 93, 94, 97, 6, 31])
+        # Each value in src_idx represents the index of the predicted bounding box. Specifically, each element in src_idx is an integer that represents the position of the prediction boundary box in the prediction result. That is, the location of the specific query
         # idx = (batch_idx,src_idx)
         idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)]) # batch内所有目标的标签拼接到一起
+        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)]) # Labels of all targets in the batch are spliced together
         target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device) # [bs, num_queries] 初始值全部设置为 self.num_classes=91
-        target_classes[idx] = target_classes_o # target_classes 中的匹配索引位置的值替换为 target_classes_o。这一步确保了 target_classes 中的值对应于实际的目标标签。
+                                    dtype=torch.int64, device=src_logits.device) # [bs, num_queries] The initial value is set to self.num_classes=91
+        target_classes[idx] = target_classes_o # The value of the matching index location in target_classes is replaced with target_classes_o. This step ensures that the values in target_classes correspond to the actual target tag.
 
         target_classes_onehot = torch.zeros([src_logits.shape[0], src_logits.shape[1], src_logits.shape[2] + 1],
                                             dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
@@ -437,20 +437,19 @@ class SetCriterion(nn.Module):
 
 def get_prototype_loss(output, labels, prototype_dict, distance="kl"):
     """
-    计算 prototype 的损失，将每个样本的特征拉近到其对应类别的 prototype。
+    The loss of prototype is calculated and the features of each sample are narrowed to the prototype of its corresponding class.
 
-    参数:
-    - features (torch.Tensor): 特征张量，形状为 (batch_size, d)，其中 d 是特征维度。
-    - labels (torch.Tensor): 样本标签，形状为 (batch_size,)。
-    - prototype_dict (dict): 字典，其中 key 是类别 label，value 是相应类别的 prototype 向量。
-    - distance (str): 距离度量方式，可选 'euclidean' 或 'kl'。
+    Parameters:
+    - features (torch.Tensor): The feature tensor has the shape (batch_size, d), where d is the feature dimension.
+    - labels (torch.Tensor): indicates a sample label with the shape (batch_size,).
+    - prototype_dict (dict): dictionary, where key is the class label and value is the prototype vector of the corresponding class.
+    - distance (str): indicates the distance measurement. The value can be 'euclidean' or 'kl'.
 
-    返回:
-    - loss (torch.Tensor): 计算得到的 prototype loss。
+    Back:
+    - loss (torch.Tensor): prototype loss.
     """
     loss = 0.0
     # import pdb; pdb.set_trace()
-    # 将每个标签对应的 prototype 取出组成一个张量
     prototype_tensor = torch.stack(
         [prototype_dict[label.item()] for label in labels]
     ).to(
@@ -596,7 +595,7 @@ def build(args):
         for i in range(args.dec_layers - 1):
             aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
         aux_weight_dict.update({k + f'_enc': v for k, v in weight_dict.items()})
-        weight_dict.update(aux_weight_dict) # 相当于把两个字典拼起来了
+        weight_dict.update(aux_weight_dict)
 
         aux_forget_weight_dict = {}
         for i in range(args.dec_layers - 1):

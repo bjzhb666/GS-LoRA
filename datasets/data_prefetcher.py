@@ -27,7 +27,7 @@ class data_prefetcher:
             self.next_samples, self.next_targets = next(self.loader)
         except (
             StopIteration
-        ):  # 如果使用Dataloader的next()方法取完了所有元素，再次调用next()方法会抛出StopIteration异常
+        ): 
             self.next_samples = None
             self.next_targets = None
             return

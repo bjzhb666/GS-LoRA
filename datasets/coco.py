@@ -86,7 +86,7 @@ def convert_coco_poly_to_mask(segmentations, height, width):
 
 class ConvertCocoPolysToMask(object):
     """
-    将 COCO 数据集中的多边形注释转换为掩码的类
+    Converts polygon comments in the COCO dataset to classes for masks
     """
 
     def __init__(self, return_masks=False):
