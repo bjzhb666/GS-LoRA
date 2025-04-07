@@ -378,7 +378,7 @@ def main(args):
     print(args)
 
     if args.rank == 0:
-        wandb.login(key="808d6ef02f3a9c448c5641c132830eb0c3c83c2a")
+        wandb.login(key="")
         wandb.init(
             project="forget learning",
             dir=args.output_dir,
