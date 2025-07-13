@@ -318,7 +318,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--pro_r_weight", type=float, default=0.0, help="prototype loss remain weight"
     )
-
+    parser.add_argument(
+        "--aug_num", default=0, type=int, help="number of augmentations parameter for prototype calculation, 0 means no aug, we can choose 0,5,9"
+    )
     # average weight
     parser.add_argument(
         "--average_weight", default=False, action="store_true", help="average weight"
@@ -597,8 +599,16 @@ if __name__ == "__main__":
             dataset=total_dataset_train,
             device=DEVICE,
             batch_size=2000,
+            aug_num=args.aug_num
         )
         # print(prototype)
+
+        # import pickle
+        # os.makedirs('prototype_diff/aug9', exist_ok=True) # prototype is a dict
+        # with open(f'prototype_diff/aug9/{str(args.few_shot_num)}_prototype_aug_9.pkl', 'wb') as f:
+        #     pickle.dump(prototype, f) # 序列化并写入文件
+        #     # import pdb; pdb.set_trace()
+        #     exit()
     else:
         prototype = None
     LOSS = nn.CrossEntropyLoss()
