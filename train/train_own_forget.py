@@ -6,6 +6,9 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import wandb
 import copy
+import swanlab
+
+swanlab.sync_wandb(wandb_run=False)
 
 from config import get_config
 from image_iter import FaceDataset
@@ -223,6 +226,11 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
     )
+    parser.add_argument(
+        '--wandb_name',
+        default='Debug',
+        type=str
+    )
     # VIT depth
     parser.add_argument(
         "--vit_depth", type=int, default=6, metavar="N", help="vit depth (default: 6)"
@@ -359,9 +367,10 @@ if __name__ == "__main__":
     print("=" * 60)
 
     wandb.init(
-        project="face recognition",
+        project="face_recognition_pami",
         group=args.wandb_group,
         mode="offline" if args.wandb_offline else "online",
+        name=args.wandb_name
     )
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
