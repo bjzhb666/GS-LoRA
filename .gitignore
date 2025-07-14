@@ -39,3 +39,7 @@ debug_list.py
 scripts/debug.py
 scripts/run_gen.sh
 scripts/run_forget_open.sh
+
+exps/
+exps_image/
+prototype_diff/

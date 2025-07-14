@@ -4,6 +4,9 @@ import torch.nn.functional as F
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import ToTensor
 from .verification import evaluate
+import torchvision.transforms as T
+import copy
+from torch.utils.data import ConcatDataset
 
 from datetime import datetime
 import matplotlib.pyplot as plt
@@ -496,11 +499,30 @@ def create_few_shot_dataset(dataset, n_shot, seed=None):
 from torch.utils.data import DataLoader
 
 
-def calculate_prototypes(backbone, dataset, batch_size=32, device="cuda"):
+def calculate_prototypes(backbone, dataset, batch_size=32, device="cuda", aug_num=0):
     backbone.eval()
     backbone.to(device)
+    
+    if aug_num==0:
+        repeated_dataset = dataset
+    else:
+        # 新增：定义 RandAugment 变换链
+        rand_augment = T.RandAugment(
+            num_ops=2,       # 每次随机应用2种变换
+            magnitude=aug_num,     # 小样本
+        )
+        transform = T.Compose([
+            rand_augment,    # 应用 RandAugment
+            T.ToTensor()     # 转换为 Tensor（若原始数据非Tensor）
+        ])
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        # 应用变换到数据集（假设 dataset 是 ImageFolder 或自定义 Dataset）
+        dataset.transform = transform  # 直接替换原变换
+        dataset_list = [dataset] * 20
+        repeated_dataset = ConcatDataset(dataset_list)
+        repeated_dataset.transform = transform  # 确保变换应用到每个样本
+
+    dataloader = DataLoader(repeated_dataset, batch_size=batch_size, shuffle=False)
 
     embeds_sum = defaultdict(lambda: 0)
     embeds_count = defaultdict(lambda: 0)
@@ -554,16 +576,23 @@ def replace_ffn_with_lora(model, rank=8):
     return model
 
 
-def modify_head(model, current_id_to_original_id, device):
+def modify_head(model_ori, current_id_to_original_id, device):
     """
     Modify the model's classification header to adapt it to the new dataset.
     """
     # Get the original classification head and weight
+    model = copy.deepcopy(model_ori)
     old_classifier = model.heads.head
     old_weight = (
         old_classifier.weight.data
     )  # Weight of the original classification head
     old_bias = old_classifier.bias.data  # Offset of original classification head
+
+    if os.path.exists('results/original_VIT_head/classifier.pth'):
+        pass
+    else:
+        os.makedirs('results/original_VIT_head', exist_ok=True)
+        torch.save( old_classifier.state_dict(), 'results/original_VIT_head/classifier.pth')
 
     # Number of categories for the new category head
     new_num_classes = len(current_id_to_original_id)
@@ -587,6 +616,20 @@ def modify_head(model, current_id_to_original_id, device):
     model.heads.head = new_classifier
     model = model.to(device)
 
+    return model
+
+def resume_head(model, device):
+    '''
+    resure the model's head using the original Imagenet 1k pretrained head.
+    '''
+    origin_classifier = torch.load('results/original_VIT_head/classifier.pth')
+    # import pdb; pdb.set_trace()
+    new_classifier = nn.Linear(origin_classifier['weight'].shape[1], 1000) # 1000 classes
+    new_classifier.weight.data = origin_classifier['weight'].data
+    new_classifier.bias.data = origin_classifier['bias'].data
+    model.heads.head = new_classifier
+    model = model.to(device)
+    
     return model
 
 
