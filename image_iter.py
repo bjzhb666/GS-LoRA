@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # encoding: utf-8
 """
-@author: yaoyaozhong
+@author: yaoyaozhong, hongbozhao
 @contact: zhongyaoyao@bupt.edu.cn
 @file: image_iter_yy.py
-@time: 2020/06/03
+@time: 2020/06/03, 2025/7/14
 @desc: training dataset loader for .rec
 """
 
@@ -24,6 +24,7 @@ import numbers
 import random
 from torch.utils.data import Dataset
 from torch.utils.data import Subset
+from PIL import Image
 
 logger = logging.getLogger()
 
@@ -134,6 +135,28 @@ class CustomSubset(Subset):
 
     def __len__(self):  # support the len() function
         return len(self.indices)
+
+
+class ImageNet900Dataset(Dataset):
+    def __init__(self, samples, transform=None):
+        self.samples = samples
+        self.transform = transform or transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            # 下面这两行是 ImageNet 预处理的标准 normalize
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std =[0.229, 0.224, 0.225]),
+        ])
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        path, label = self.samples[idx]
+        img = Image.open(path).convert("RGB")
+        img = self.transform(img)
+        return img, label
 
 
 if __name__ == "__main__":
