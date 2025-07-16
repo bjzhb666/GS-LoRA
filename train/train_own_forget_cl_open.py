@@ -5,7 +5,9 @@ import torch.optim as optim
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import wandb
+import swanlab
 
+swanlab.sync_wandb(wandb_run=False)
 from config import get_config
 from image_iter import CLDatasetWrapper, CustomSubset
 

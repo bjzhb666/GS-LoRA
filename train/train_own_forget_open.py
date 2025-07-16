@@ -8,7 +8,9 @@ import wandb
 import random
 from config import get_config
 from image_iter import CLDatasetWrapper, CustomSubset
+import swanlab
 
+swanlab.sync_wandb(wandb_run=False)
 from util.utils import (
     get_unique_classes,
 )
