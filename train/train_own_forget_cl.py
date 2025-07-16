@@ -2,12 +2,15 @@ import os, argparse, sklearn
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.utils
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import wandb
+import swanlab
 
+swanlab.sync_wandb(wandb_run=False)
 from config import get_config
-from image_iter import CLDatasetWrapper, CustomSubset
+from image_iter import CLDatasetWrapper, CustomSubset, ImageNet900Dataset
 
 from util.utils import (
     calculate_prototypes,
@@ -16,6 +19,7 @@ from util.utils import (
     get_unique_classes,
     replace_ffn_with_lora,
     modify_head,
+    resume_head,
 )
 from util.utils import (
     split_dataset,
@@ -100,7 +104,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     wandb.init(
-        project="face recognition",
+        project="face_recognition_pami",
         group=args.wandb_group,
         mode="offline" if args.wandb_offline else "online",
     )
@@ -141,15 +145,35 @@ if __name__ == "__main__":
             ]
         )
         # Load ImageNet official category labels (fixed order)
-        IMAGENET_CLASSES_PATH = "data/imagenet100/imagenet_classes.txt"
+        IMAGENET_CLASSES_PATH = "data/imagenet100/imagenet_folder_names.txt"
         assert os.path.exists(
             IMAGENET_CLASSES_PATH
-        ), "Please download the ImageNet class label file imagenet_classes.txt!"
+        ), "Please download the ImageNet class label file imagenet_folder_names.txt!"
         with open(IMAGENET_CLASSES_PATH) as f:
             imagenet_classes = [line.strip() for line in f.readlines()]
 
         imagenet_test_dataset = ImageFolder(
             root=os.path.join(DATA_ROOT, "test"), transform=data_transform
+        )
+        # Imagenet 900 val dataset
+        with open('data/imagenet100/imagenet_folder_names.txt') as f:
+            global_classes = [line.strip() for line in f]
+        class_to_idx_global = {cls_name: idx for idx, cls_name in enumerate(global_classes)}
+        root900 = "data/imagenet_val_split/nonexist"
+        data900 = []
+        for cls_folder in os.listdir(root900):
+            cls_path = os.path.join(root900, cls_folder)
+            if not os.path.isdir(cls_path):
+                continue
+            if cls_folder not in class_to_idx_global:
+                # import pdb; pdb.set_trace()
+                raise ValueError(f"未在全局 1000 类中找到 `{cls_folder}`")
+            global_idx = class_to_idx_global[cls_folder]
+            for img_name in os.listdir(cls_path):
+                if img_name.lower().endswith((".jpg", ".jpeg", ".png")):
+                    data900.append((os.path.join(cls_path, img_name), global_idx))
+        imagenet_val_miss_dataset = ImageNet900Dataset(
+            samples=data900, transform=data_transform
         )
         # Check the order of categories loaded by ImageFolder
         test_classes = list(
@@ -249,9 +273,42 @@ if __name__ == "__main__":
         print("=" * 60)
 
     if args.data_mode == "imagenet100":
+        imagenet_val_miss_dataloader = torch.utils.data.DataLoader(
+            imagenet_val_miss_dataset,
+            batch_size=1000,
+            shuffle=False,
+            num_workers=WORKERS,
+            drop_last=False,
+        )
+        
+        with torch.no_grad():
+            missing_acc_backbone_before = eval_data(
+                BACKBONE.to(DEVICE),
+                imagenet_val_miss_dataloader,
+                DEVICE,
+                "imagenet-val-miss-backbone",
+                0,
+            )
+        # import pdb; pdb.set_trace()
         BACKBONE = modify_head(
             BACKBONE, current_id_to_original_id=current_id_to_original_id, device=DEVICE
         )
+
+        with torch.no_grad():
+            BACKBONE_RESUME = resume_head(BACKBONE, device=DEVICE)
+            missing_acc_before = eval_data(
+                BACKBONE_RESUME.to(DEVICE),
+                imagenet_val_miss_dataloader,
+                DEVICE,
+                "imagenet-val-miss",
+                0,
+            )
+            # import pdb; pdb.set_trace()
+            print(
+                "Missing class accuracy before training BAKCBONE_RESUME: {:.2f}%    BACKBONE: {:.2f}%".format(
+                    missing_acc_before * 100, missing_acc_backbone_before * 100
+                )
+            )
 
     if args.one_stage:
         if args.lora_rank > 0:
