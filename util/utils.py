@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torchvision.datasets import ImageFolder
 from torchvision.transforms import ToTensor
 from .verification import evaluate
-import torchvision.transforms as T
+
 import copy
 from torch.utils.data import ConcatDataset
 
@@ -507,13 +507,13 @@ def calculate_prototypes(backbone, dataset, batch_size=32, device="cuda", aug_nu
         repeated_dataset = dataset
     else:
         # 新增：定义 RandAugment 变换链
-        rand_augment = T.RandAugment(
+        rand_augment = transforms.RandAugment(
             num_ops=2,       # 每次随机应用2种变换
             magnitude=aug_num,     # 小样本
         )
-        transform = T.Compose([
+        transform = transforms.Compose([
             rand_augment,    # 应用 RandAugment
-            T.ToTensor()     # 转换为 Tensor（若原始数据非Tensor）
+            transforms.ToTensor()     # 转换为 Tensor（若原始数据非Tensor）
         ])
 
         # 应用变换到数据集（假设 dataset 是 ImageFolder 或自定义 Dataset）
@@ -622,6 +622,7 @@ def resume_head(model, device):
     '''
     resure the model's head using the original Imagenet 1k pretrained head.
     '''
+    model = copy.deepcopy(model)  # 创建模型的一个深拷贝
     origin_classifier = torch.load('results/original_VIT_head/classifier.pth')
     # import pdb; pdb.set_trace()
     new_classifier = nn.Linear(origin_classifier['weight'].shape[1], 1000) # 1000 classes
