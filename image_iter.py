@@ -159,6 +159,50 @@ class ImageNet900Dataset(Dataset):
         return img, label
 
 
+class AugmentedDataset(Dataset):
+    def __init__(self, base_dataset, duplication_factor=20, transform=None):
+        """
+        Args:
+            base_dataset (Dataset): The few-shot dataset.
+            duplication_factor (int): Number of times to replicate each sample.
+            transform (callable, optional): Transform to apply to each duplicated image.
+        """
+        self.base_dataset = base_dataset
+        self.duplication_factor = duplication_factor
+        self.transform = transform
+
+        self.expanded_indices = [
+            idx for idx in range(len(base_dataset)) for _ in range(duplication_factor)
+        ]
+
+    def __getitem__(self, idx):
+        base_idx = self.expanded_indices[idx]
+        image, label = self.base_dataset[base_idx]
+        # import pdb; pdb.set_trace()
+        if self.transform:
+            image = self.transform(image)
+
+        return image, label
+
+    def __len__(self):
+        return len(self.expanded_indices)
+    
+
+class TransformWrapper(torch.utils.data.Dataset):
+    def __init__(self, dataset, transform):
+        self.dataset = dataset
+        self.transform = transform
+
+    def __getitem__(self, index):
+        x, y = self.dataset[index]
+        if self.transform:
+            x = self.transform(x)
+        return x, y
+
+    def __len__(self):
+        return len(self.dataset)
+
+
 if __name__ == "__main__":
     root = "./data/faces_webface_112x112/train.rec"
     embed()
