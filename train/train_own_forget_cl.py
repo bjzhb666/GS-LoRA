@@ -107,6 +107,7 @@ if __name__ == "__main__":
         project="face_recognition_pami",
         group=args.wandb_group,
         mode="offline" if args.wandb_offline else "online",
+        name=args.outdir.split("/")[-1],
     )
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
@@ -306,7 +307,7 @@ if __name__ == "__main__":
             # import pdb; pdb.set_trace()
             print(
                 "Missing class accuracy before training BAKCBONE_RESUME: {:.2f}%    BACKBONE: {:.2f}%".format(
-                    missing_acc_before * 100, missing_acc_backbone_before * 100
+                    missing_acc_before , missing_acc_backbone_before
                 )
             )
 
@@ -1685,6 +1686,16 @@ if __name__ == "__main__":
                 )
 
             wandb.log({"old_acc_after_{}".format(task_i): old_acc})
+        if args.data_mode == 'imagenet100':
+            BACKBONE_RESUME = resume_head(BACKBONE, device=DEVICE)
+            missing_acc_after = eval_data(
+                BACKBONE_RESUME.to(DEVICE),
+                imagenet_val_miss_dataloader,
+                DEVICE,
+                "imagenet-val-missing-after-{}".format(task_i),
+                0, # placeholder
+            )
+            print(f"missing_acc_after_{task_i}: {missing_acc_after}%")
     wandb.run.name = (
         "remain-"
         + str(args.num_of_first_cls)
