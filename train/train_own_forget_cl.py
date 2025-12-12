@@ -640,7 +640,7 @@ if __name__ == "__main__":
                 backbone=BACKBONE,
                 dataset=total_dataset_train,
                 device=DEVICE,
-                batch_size=2000,
+                batch_size=500,
             )
         else:
             prototype = None
@@ -707,6 +707,15 @@ if __name__ == "__main__":
             worker_init_fn=seed_worker,
             generator=forget_train_generator,
         )
+        train_loader_forget_for_test = torch.utils.data.DataLoader(
+            forget_dataset_train_sub,
+            batch_size=BATCH_SIZE*10,
+            shuffle=False,
+            num_workers=WORKERS,
+            drop_last=False,
+            worker_init_fn=seed_worker,
+            generator=forget_train_generator,
+        )
         train_loader_remain = torch.utils.data.DataLoader(
             remain_dataset_train_sub,
             batch_size=BATCH_SIZE,
@@ -716,16 +725,25 @@ if __name__ == "__main__":
             worker_init_fn=seed_worker,
             generator=remain_train_generator,
         )
+        train_loader_remain_for_test = torch.utils.data.DataLoader(
+            remain_dataset_train_sub,
+            batch_size=BATCH_SIZE*10,
+            shuffle=False,
+            num_workers=WORKERS,
+            drop_last=False,
+            worker_init_fn=seed_worker,
+            generator=remain_train_generator,
+        )
         testloader_forget = torch.utils.data.DataLoader(
             forget_dataset_test,
-            batch_size=BATCH_SIZE,
+            batch_size=BATCH_SIZE*10,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
         )
         testloader_remain = torch.utils.data.DataLoader(
             remain_dataset_test,
-            batch_size=BATCH_SIZE,
+            batch_size=BATCH_SIZE*10,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -883,14 +901,14 @@ if __name__ == "__main__":
             print("Perform Evaluation on forget train set and remain train set...")
             forget_acc_train_before = eval_data(
                 BACKBONE,
-                train_loader_forget,
+                train_loader_forget_for_test,
                 DEVICE,
                 "forget-train-{}".format(task_i),
                 batch,
             )
             remain_acc_train_before = eval_data(
                 BACKBONE,
-                train_loader_remain,
+                train_loader_remain_for_test,
                 DEVICE,
                 "remain-train-{}".format(task_i),
                 batch,
@@ -923,7 +941,7 @@ if __name__ == "__main__":
             forget_acc_train_before = eval_data_LIRF(
                 student_low=BACKBONE,
                 teacher_up=teacher_model_up,
-                testloader=train_loader_forget,
+                testloader=train_loader_forget_for_test,
                 device=DEVICE,
                 mode="forget-train-{}".format(task_i),
                 batch=batch,
@@ -931,7 +949,7 @@ if __name__ == "__main__":
             remain_acc_train_before = eval_data_LIRF(
                 student_low=BACKBONE,
                 teacher_up=teacher_model_up,
-                testloader=train_loader_remain,
+                testloader=train_loader_remain_for_test,
                 device=DEVICE,
                 mode="remain-train-{}".format(task_i),
                 batch=batch,
@@ -1448,7 +1466,7 @@ if __name__ == "__main__":
 
                     importance = calculate_importance_ewc(
                         model_without_ddp, importance_dataloader_train
-                    )  # the first task needs the whole dataset # FIXME: need to modify, should be the first remain set
+                    )  #  the first task needs the whole dataset, the importance dataset should be the first remain set
                     regularization_terms[0] = {
                         "importance": importance,
                         "task_param": task_param,
@@ -1497,7 +1515,7 @@ if __name__ == "__main__":
 
                     importance = calculate_importance_mas(
                         model_without_ddp, importance_dataloader_train
-                    )  # the first task needs the whole dataset # FIXME: need to modify, should be the first remain set
+                    )  # the first task needs the whole dataset, the importance dataset should be the first remain set
                     regularization_terms[0] = {
                         "importance": importance,
                         "task_param": task_param,
