@@ -102,9 +102,10 @@ if __name__ == "__main__":
     print("=" * 60)
 
     wandb.init(
-        project="face recognition",
+        project="face_recognition_pami",
         group=args.wandb_group,
         mode="offline" if args.wandb_offline else "online",
+        name="open"+args.outdir.split("/")[-1]
     )
     wandb.config.update(args)
     # writer = SummaryWriter(WORK_PATH) # writer for buffering intermedium results
