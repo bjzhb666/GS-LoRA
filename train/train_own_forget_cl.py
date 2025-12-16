@@ -709,7 +709,7 @@ if __name__ == "__main__":
         )
         train_loader_forget_for_test = torch.utils.data.DataLoader(
             forget_dataset_train_sub,
-            batch_size=BATCH_SIZE*10,
+            batch_size=BATCH_SIZE*20,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -727,7 +727,7 @@ if __name__ == "__main__":
         )
         train_loader_remain_for_test = torch.utils.data.DataLoader(
             remain_dataset_train_sub,
-            batch_size=BATCH_SIZE*10,
+            batch_size=BATCH_SIZE*20,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -736,14 +736,14 @@ if __name__ == "__main__":
         )
         testloader_forget = torch.utils.data.DataLoader(
             forget_dataset_test,
-            batch_size=BATCH_SIZE*10,
+            batch_size=BATCH_SIZE*20,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
         )
         testloader_remain = torch.utils.data.DataLoader(
             remain_dataset_test,
-            batch_size=BATCH_SIZE*10,
+            batch_size=BATCH_SIZE*20,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
