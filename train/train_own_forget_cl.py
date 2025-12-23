@@ -709,7 +709,7 @@ if __name__ == "__main__":
         )
         train_loader_forget_for_test = torch.utils.data.DataLoader(
             forget_dataset_train_sub,
-            batch_size=BATCH_SIZE*20,
+            batch_size=BATCH_SIZE*5,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -727,7 +727,7 @@ if __name__ == "__main__":
         )
         train_loader_remain_for_test = torch.utils.data.DataLoader(
             remain_dataset_train_sub,
-            batch_size=BATCH_SIZE*20,
+            batch_size=BATCH_SIZE*5,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -736,14 +736,14 @@ if __name__ == "__main__":
         )
         testloader_forget = torch.utils.data.DataLoader(
             forget_dataset_test,
-            batch_size=BATCH_SIZE*20,
+            batch_size=BATCH_SIZE*5,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
         )
         testloader_remain = torch.utils.data.DataLoader(
             remain_dataset_test,
-            batch_size=BATCH_SIZE*20,
+            batch_size=BATCH_SIZE*5,
             shuffle=False,
             num_workers=WORKERS,
             drop_last=False,
@@ -1110,10 +1110,52 @@ if __name__ == "__main__":
             losses_CE.reset()
             losses_reg.reset()
 
-            BACKBONE.train()
             print("start retrain...")
-            # reinitalize the model
-            BACKBONE = BACKBONE_DICT[BACKBONE_NAME]
+            # reinitalize the model with new instance
+            if BACKBONE_NAME == "VIT":
+                BACKBONE = ViT_face(
+                    loss_type=HEAD_NAME,
+                    GPU_ID=GPU_ID,
+                    num_class=NUM_CLASS,
+                    image_size=112,
+                    patch_size=8,
+                    dim=512,
+                    depth=args.vit_depth,
+                    heads=8,
+                    mlp_dim=2048,
+                    dropout=0.1,
+                    emb_dropout=0.1,
+                    lora_rank=args.lora_rank,
+                    lora_pos=args.lora_pos,
+                )
+            elif BACKBONE_NAME == "VITs":
+                BACKBONE = ViTs_face(
+                    loss_type=HEAD_NAME,
+                    GPU_ID=GPU_ID,
+                    num_class=NUM_CLASS,
+                    image_size=112,
+                    patch_size=8,
+                    ac_patch_size=12,
+                    pad=4,
+                    dim=512,
+                    depth=args.vit_depth,
+                    heads=8,
+                    mlp_dim=2048,
+                    dropout=0.1,
+                    emb_dropout=0.1,
+                    lora_rank=args.lora_rank,
+                )
+            elif BACKBONE_NAME == "VIT_B16":
+                BACKBONE = replace_ffn_with_lora(
+                    ModifiedViT(vit_b_16(weights=ViT_B_16_Weights.IMAGENET1K_V1)),
+                    rank=args.lora_rank,
+                )
+            else:
+                raise ValueError(f"Unsupported backbone: {BACKBONE_NAME}")
+
+            BACKBONE = BACKBONE.to(DEVICE)
+
+            BACKBONE.train()
             epoch = 0  # force it to be 0 to avoid affecting the epoch calculation of the next task
             for epoch in range(NUM_EPOCH):  # start training process
 

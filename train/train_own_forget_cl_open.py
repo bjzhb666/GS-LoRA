@@ -1003,10 +1003,43 @@ if __name__ == "__main__":
             losses_CE.reset()
             losses_reg.reset()
 
-            BACKBONE.train()
             print("start retrain...")
-            # reinitalize the model
-            BACKBONE = BACKBONE_DICT[BACKBONE_NAME]
+            # reinitalize the model with new instance
+            BACKBONE = {
+                "VIT": ViT_face(
+                    loss_type=HEAD_NAME,
+                    GPU_ID=GPU_ID,
+                    num_class=NUM_CLASS,
+                    image_size=112,
+                    patch_size=8,
+                    dim=512,
+                    depth=args.vit_depth,
+                    heads=8,
+                    mlp_dim=2048,
+                    dropout=0.1,
+                    emb_dropout=0.1,
+                    lora_rank=args.lora_rank,
+                    lora_pos=args.lora_pos,
+                ),
+                "VITs": ViTs_face(
+                    loss_type=HEAD_NAME,
+                    GPU_ID=GPU_ID,
+                    num_class=NUM_CLASS,
+                    image_size=112,
+                    patch_size=8,
+                    ac_patch_size=12,
+                    pad=4,
+                    dim=512,
+                    depth=args.vit_depth,
+                    heads=8,
+                    mlp_dim=2048,
+                    dropout=0.1,
+                    emb_dropout=0.1,
+                    lora_rank=args.lora_rank,
+                ),
+            }[BACKBONE_NAME]
+            
+            BACKBONE.train()
             epoch = 0  # force it to be 0 to avoid affecting the epoch calculation of the next task
             for epoch in range(NUM_EPOCH):  # start training process
 
