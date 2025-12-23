@@ -1039,8 +1039,16 @@ if __name__ == "__main__":
                 ),
             }[BACKBONE_NAME]
             
+            if MULTI_GPU:
+                # multi-GPU setting for retrained model
+                BACKBONE = nn.DataParallel(BACKBONE, device_ids=GPU_ID)
             BACKBONE = BACKBONE.to(DEVICE)
             BACKBONE.train()
+            
+            # Create new optimizer for the reinitialized model
+            OPTIMIZER = create_optimizer(args, BACKBONE)
+            lr_scheduler, _ = create_scheduler(args, OPTIMIZER)
+
             epoch = 0  # force it to be 0 to avoid affecting the epoch calculation of the next task
             for epoch in range(NUM_EPOCH):  # start training process
 
