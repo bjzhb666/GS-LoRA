@@ -1039,6 +1039,7 @@ if __name__ == "__main__":
                 ),
             }[BACKBONE_NAME]
             
+            BACKBONE = BACKBONE.to(DEVICE)
             BACKBONE.train()
             epoch = 0  # force it to be 0 to avoid affecting the epoch calculation of the next task
             for epoch in range(NUM_EPOCH):  # start training process
