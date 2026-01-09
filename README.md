@@ -8,7 +8,7 @@ This is the official implementation of ***GS-LoRA*** (CVPR 2024). GS-LoRA is eff
 
 [‪Hongbo Zhao](https://scholar.google.com/citations?user=Gs22F0UAAAAJ&hl=zh-CN), Bolin Ni, [‪Junsong Fan‬](https://scholar.google.com/citations?user=AfK4UcUAAAAJ&hl=zh-CN&oi=sra), [‪Yuxi Wang‬](https://scholar.google.com/citations?user=waLCodcAAAAJ&hl=zh-CN&oi=sra), [‪Yuntao Chen‬](https://scholar.google.com/citations?hl=zh-CN&user=iLOoUqIAAAAJ), [‪Gaofeng Meng](https://scholar.google.com/citations?hl=zh-CN&user=5hti_r0AAAAJ), [‪Zhaoxiang Zhang‬](https://scholar.google.com/citations?hl=zh-CN&user=qxWfV6cAAAAJ)
 
-**Practical Continual Forgetting for Pre-trained Vision Models (**An extension of this paper**, where we consider more practical scenarios including few-shot settings and missing class settings) [[paper](https://arxiv.org/pdf/2501.09705)]**
+**Practical Continual Forgetting for Pre-trained Vision Models (**T-PAMI 2026**, where we consider more practical scenarios including few-shot settings and missing class settings) [[paper](https://arxiv.org/pdf/2501.09705)]**
 
 [‪Hongbo Zhao](https://scholar.google.com/citations?user=Gs22F0UAAAAJ&hl=zh-CN), [Fei Zhu](https://impression2805.github.io/), Bolin Ni, [Feng Zhu](https://zhufengx.github.io/), [‪Gaofeng Meng](https://scholar.google.com/citations?hl=zh-CN&user=5hti_r0AAAAJ), [‪Zhaoxiang Zhang‬](https://scholar.google.com/citations?hl=zh-CN&user=qxWfV6cAAAAJ)
 
@@ -20,25 +20,6 @@ We incorporate a set of LoRA modules in each continual forgetting task and propo
 Transformer block as one group. We use group sparse regularization ( $\mathcal{L}_{structure}$ ) to automatically select LoRA groups. The purple groups are selected to modify and the white groups are neglected. The pre-trained model (including Transformer blocks and other parts) is frozen and only LoRA groups are trainable. (Right) To achieve selective forgetting, we utilize selective forgetting and knowledge retention ( $\mathcal{L}_{data}$ ). To further extend our method to more practical scenarios, we introduce
 prototype regularization $\mathcal{L}_{pro}$. We use the original model to calculate the prototype of each class and pull away logits from its original prototype for each forgotten class and pull in logits from its own prototype for the remaining classes.
 
-## Experimental results
-
-### Single-step Forgetting
-
-![1735645979681](image/README/1735645979681.png)
-
-### Continual Forgetting
-
-a. Continual forgetting results for face recognition
-
-![1735645969159](image/README/1735645969159.png)
-
-b. Continual forgetting results on ImageNet100
-
-![1735645958401](image/README/1735645958401.png)
-
-### Practical forgetting (missing class settings)
-
-![1735645932783](image/README/1735645932783.png)
 
 ## Getting Started
 
@@ -79,6 +60,8 @@ Then we should change the folders' names. Please refer to this post for details:
 
 We get imagenet_classes.txt from [pytorch](https://github.com/pytorch/hub/blob/master/imagenet_classes.txt).
 
+For `imagenet_folder_names.txt`,  it contains the folder names of all 1k classes. You can download it from our [huggingface link]() or [modelscope link](https://www.modelscope.cn/datasets/zhaohongbo/GS-LoRA-imagenet100). **We highly recommend you to use the link because we have already fix small bugs of the meta data.**
+
 ##### c.3 Final File structure
 
 ```
@@ -87,10 +70,12 @@ We get imagenet_classes.txt from [pytorch](https://github.com/pytorch/hub/blob/m
 │   ├── test
 │   └── train
 ├── imagenet100
-│   ├── imagenet_classes.txt
-│   ├── test
-│   └── train
-└── Labels.json
+│  ├── convert.py
+│  ├── imagenet_classes.txt
+│  ├── imagenet_class_index.json
+│  ├── imagenet_folder_names.txt
+│  ├── test
+│  └── train
 ```
 
 ## Pretrain a Face Transformer
