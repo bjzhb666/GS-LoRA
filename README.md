@@ -1,4 +1,4 @@
-# Continual Forgetting for Pre-trained Vision Models (CVPR 2024)
+# Practical Continual Forgetting for Pre-trained Vision Models (CVPR 2024; T-PAMI 2026)
 
 ![1735645758635](image/README/1735645758635.png)
 
