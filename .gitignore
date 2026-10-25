@@ -1,45 +1,47 @@
-data/
-eval/
+/data/
+/eval/
 
 __pycache__/
-wandb/
-test-Tsne/
-Tsne/
-draw/
+/wandb/
+/test-Tsne/
+/Tsne/
+/draw/
 get_lfw_val_data_pair.py
 tsne_main.py
 test.ipynb
-log/
+/log/
 *.pdf
 *.png
 !image/README/*.png
+!docs/static/*.png
 *.npy
 *.pth
 *.txt
 !requirements.txt
+!data/**/*.txt
 
-results/
+/results/
 __pycache__/
-wandb/
-scripts/run.sh
-scripts/test.sh
+/wandb/
 
-backbone_forget/
-test/test.py
-train/train.py
 
-util/test.py
 
-reconstruct/
+/reconstruct/
 *.csv
 
-train/debug.py
 debug_list.py
 
-scripts/debug.py
-scripts/run_gen.sh
-scripts/run_forget_open.sh
 
-exps/
-exps_image/
-prototype_diff/
+/exps/
+/exps_image/
+/prototype_diff/
+# refactor additions
+.venv/
+.pytest_cache/
+*.egg-info/
+metrics.jsonl
+config.json
+gslora.egg-info/
+.venv-cu118/
+.venv-gpu/
+.vscode/

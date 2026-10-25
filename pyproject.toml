@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gslora"
+version = "0.2.0"
+description = "GS-LoRA / GS-LoRA++: practical continual forgetting for pre-trained vision models"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+dependencies = [
+    "torch>=2.4",
+    "torchvision>=0.19",
+    "timm>=0.9.2",
+    "loralib>=0.1.2",
+    "einops>=0.8",
+    "numpy>=1.26,<3",
+    "pillow>=11.0",
+    "scikit-learn>=1.5",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+# Experiment tracking is optional: without it the code logs to stdout/JSONL.
+wandb = ["wandb>=0.18"]
+swanlab = ["swanlab>=0.3"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+gslora-forget = "gslora.tools.train_forget:main"
+gslora-pretrain = "gslora.tools.pretrain:main"
+gslora-eval = "gslora.tools.evaluate:main"
+
+[tool.setuptools.packages.find]
+include = ["gslora*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Practical Continual Forgetting for Pre-trained Vision Models</title>
+<meta name="description" content="GS-LoRA / GS-LoRA++: continually erase selected knowledge from a pre-trained vision model while keeping the rest. TPAMI 2026 / CVPR 2024." />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Practical Continual Forgetting for Pre-trained Vision Models" />
+<meta property="og:description" content="GS-LoRA / GS-LoRA++: continually erase selected knowledge from a pre-trained vision model while keeping the rest." />
+<meta property="og:image" content="static/teaser.png" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+/* ───────────────────────────────────────────────────────────
+   Palette is semantic: vermilion = forgotten, teal = retained.
+   The whole page is built on that duality.
+   ─────────────────────────────────────────────────────────── */
+:root{
+  --ink:#0c0c0e;
+  --ink-2:#141418;
+  --ink-3:#1c1c22;
+  --paper:#ece7dd;
+  --paper-dim:#9a958c;
+  --paper-faint:#565249;
+  --forget:#ff5436;      /* erased */
+  --retain:#3fd3c0;      /* kept */
+  --rule:#272730;
+  --maxw:1180px;
+  --measure:70ch;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--ink);
+  color:var(--paper);
+  font-family:"IBM Plex Sans",ui-sans-serif,sans-serif;
+  font-weight:300;
+  font-size:17px;
+  line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+/* atmosphere: two soft fields + a grain overlay */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(60rem 40rem at 12% -8%, rgba(255,84,54,.13), transparent 62%),
+    radial-gradient(52rem 38rem at 92% 4%, rgba(63,211,192,.09), transparent 60%);
+}
+body::after{
+  content:"";position:fixed;inset:-50%;z-index:1;pointer-events:none;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation:grain 7s steps(6) infinite;
+}
+@keyframes grain{
+  0%,100%{transform:translate(0,0)} 17%{transform:translate(-3%,-4%)}
+  33%{transform:translate(2%,-2%)} 50%{transform:translate(-2%,3%)}
+  67%{transform:translate(3%,2%)}  83%{transform:translate(-1%,-1%)}
+}
+main,header,footer{position:relative;z-index:2}
+
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px}
+
+/* ── typography ── */
+h1,h2,h3{font-family:"Instrument Serif",Georgia,serif;font-weight:400;letter-spacing:-.012em;margin:0}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;font-weight:500;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--paper-dim);
+}
+
+/* ── top rule / venue bar ── */
+.topbar{
+  border-bottom:1px solid var(--rule);
+  background:rgba(12,12,14,.72);
+  backdrop-filter:blur(14px);
+  position:sticky;top:0;z-index:50;
+}
+.topbar .wrap{display:flex;align-items:center;justify-content:space-between;gap:20px;height:52px}
+.topbar .mark{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.2em;color:var(--paper)}
+.topbar .mark b{color:var(--forget);font-weight:500}
+.topnav{display:flex;gap:22px}
+.topnav a{
+  font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--paper-dim);text-decoration:none;
+  position:relative;padding:2px 0;transition:color .25s;
+}
+.topnav a::after{
+  content:"";position:absolute;left:0;bottom:0;height:1px;width:0;
+  background:var(--forget);transition:width .3s cubic-bezier(.2,.8,.2,1);
+}
+.topnav a:hover{color:var(--paper)}
+.topnav a:hover::after{width:100%}
+@media(max-width:760px){.topnav{display:none}}
+
+/* ── hero ── */
+.hero{padding:88px 0 64px}
+.hero .venue{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:26px}
+.tag{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.14em;
+  text-transform:uppercase;padding:5px 11px;border:1px solid var(--rule);
+  border-radius:2px;color:var(--paper-dim);
+}
+.tag.hot{border-color:rgba(255,84,54,.45);color:var(--forget)}
+
+h1{
+  font-size:clamp(2.7rem,7.2vw,5.4rem);
+  line-height:1.02;
+  max-width:19ch;
+}
+/* the title's own erasure motif: a rule sweeps through "Forgetting" */
+.erase{position:relative;display:inline-block;color:var(--forget)}
+.erase::after{
+  content:"";position:absolute;left:-.04em;right:-.04em;top:56%;height:.055em;
+  background:var(--forget);transform:scaleX(0);transform-origin:left;
+  animation:strike 1.5s 1.15s cubic-bezier(.65,0,.35,1) forwards;
+}
+@keyframes strike{to{transform:scaleX(1)}}
+
+.authors{margin:30px 0 6px;max-width:72ch;font-size:1.02rem;color:var(--paper)}
+.authors a{color:var(--paper);text-decoration:none;border-bottom:1px solid var(--paper-faint);transition:border-color .2s,color .2s}
+.authors a:hover{color:var(--retain);border-color:var(--retain)}
+.affil{font-size:.88rem;color:var(--paper-dim);max-width:72ch}
+
+/* ── action buttons ── */
+.actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:34px}
+.btn{
+  display:inline-flex;align-items:center;gap:9px;
+  font-family:"IBM Plex Mono",monospace;font-size:.76rem;letter-spacing:.1em;
+  text-transform:uppercase;text-decoration:none;
+  padding:11px 17px;border:1px solid var(--rule);border-radius:2px;
+  color:var(--paper);background:var(--ink-2);
+  transition:border-color .22s,background .22s,transform .22s,color .22s;
+}
+.btn svg{width:14px;height:14px;flex:none}
+.btn:hover{transform:translateY(-2px);border-color:var(--paper-faint);background:var(--ink-3)}
+.btn.primary{background:var(--forget);border-color:var(--forget);color:#150603;font-weight:500}
+.btn.primary:hover{background:#ff6d53;border-color:#ff6d53;color:#150603}
+
+/* ── figures ── */
+figure{margin:0}
+.fig{
+  border:1px solid var(--rule);border-radius:3px;background:var(--paper);
+  padding:14px;overflow:hidden;
+}
+.fig img{display:block;width:100%;height:auto}
+figcaption{
+  margin-top:13px;font-size:.86rem;line-height:1.6;color:var(--paper-dim);
+  max-width:92ch;
+}
+figcaption b{color:var(--paper);font-weight:500}
+
+/* ── sections ── */
+section{padding:76px 0;border-top:1px solid var(--rule)}
+.sechead{display:flex;align-items:baseline;gap:16px;margin-bottom:34px}
+.sechead h2{font-size:clamp(1.8rem,3.4vw,2.6rem)}
+.sechead .num{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--forget);letter-spacing:.18em}
+
+.lede{font-size:1.14rem;line-height:1.72;max-width:var(--measure);color:#dcd6cb}
+.lede.drop::first-letter{
+  float:left;font-family:"Instrument Serif",serif;font-size:3.5rem;line-height:.82;
+  padding:.07em .14em 0 0;color:var(--forget);
+}
+
+/* abstract: prose + a rail that states the three challenges */
+.abstract-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,.85fr);gap:56px;align-items:start}
+@media(max-width:980px){.abstract-grid{grid-template-columns:1fr;gap:40px}}
+.rail{border-left:1px solid var(--rule);padding-left:26px;position:sticky;top:88px}
+@media(max-width:980px){.rail{position:static;border-left:none;border-top:1px solid var(--rule);padding:26px 0 0}}
+.rail .eyebrow{display:block;margin-bottom:20px}
+.chal{display:flex;gap:14px;padding:15px 0;border-bottom:1px solid var(--rule)}
+.chal:last-child{border-bottom:none}
+.chal .i{
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--forget);
+  flex:none;padding-top:.22em;letter-spacing:.04em;
+}
+.chal p{margin:0;font-size:.93rem;line-height:1.58;color:var(--paper-dim)}
+.chal b{color:var(--paper);font-weight:500}
+
+/* ── the three losses ── */
+.losses{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);margin-top:40px}
+.loss{background:var(--ink-2);padding:26px 24px;transition:background .3s}
+.loss:hover{background:var(--ink-3)}
+.loss .sym{font-family:"Instrument Serif",serif;font-style:italic;font-size:1.5rem;color:var(--retain);margin-bottom:9px}
+.loss h3{font-size:1.1rem;margin-bottom:8px}
+.loss p{font-size:.92rem;line-height:1.6;color:var(--paper-dim);margin:0}
+
+/* ── stats strip ── */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule)}
+.stat{background:var(--ink-2);padding:28px 22px}
+.stat .v{font-family:"Instrument Serif",serif;font-size:clamp(2.1rem,4.6vw,3rem);line-height:1;color:var(--forget)}
+.stat .v.keep{color:var(--retain)}
+.stat .k{margin-top:9px;font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.13em;text-transform:uppercase;color:var(--paper-dim)}
+.stat .n{margin-top:5px;font-size:.84rem;color:var(--paper-faint);line-height:1.5}
+
+/* ── results table ── */
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);background:var(--ink-2)}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:.92rem}
+caption{
+  caption-side:top;text-align:left;padding:18px 20px 0;
+  font-size:.86rem;color:var(--paper-dim);
+}
+th,td{padding:11px 16px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--paper-dim);font-weight:500;
+}
+tbody tr:last-child td{border-bottom:none}
+tbody tr.ours{background:rgba(255,84,54,.06)}
+tbody tr.ours td{color:var(--paper)}
+tbody tr.ours td:first-child{font-weight:500;color:var(--forget)}
+tbody td{color:var(--paper-dim);font-variant-numeric:tabular-nums}
+.up::after{content:" ↑";color:var(--retain);font-size:.8em}
+.down::after{content:" ↓";color:var(--forget);font-size:.8em}
+.note{margin-top:14px;font-size:.84rem;color:var(--paper-faint);max-width:var(--measure)}
+
+/* ── code ── */
+pre{
+  margin:0;background:var(--ink-2);border:1px solid var(--rule);
+  padding:20px 22px;overflow-x:auto;border-radius:3px;
+  font-family:"IBM Plex Mono",monospace;font-size:.84rem;line-height:1.75;color:#cfc9bd;
+}
+pre .c{color:var(--paper-faint)}
+pre .f{color:var(--retain)}
+.codehead{
+  display:flex;justify-content:space-between;align-items:center;gap:14px;
+  margin-bottom:11px;
+}
+.codehead .eyebrow{margin:0}
+.copy{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.11em;
+  text-transform:uppercase;background:none;border:1px solid var(--rule);
+  color:var(--paper-dim);padding:6px 12px;border-radius:2px;cursor:pointer;
+  transition:border-color .2s,color .2s;
+}
+.copy:hover{border-color:var(--retain);color:var(--retain)}
+.copy.done{border-color:var(--retain);color:var(--retain)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+
+/* ── footer ── */
+footer{border-top:1px solid var(--rule);padding:46px 0 64px;color:var(--paper-faint);font-size:.86rem}
+footer a{color:var(--paper-dim);text-decoration:none;border-bottom:1px solid var(--rule)}
+footer a:hover{color:var(--retain);border-color:var(--retain)}
+.footrow{display:flex;flex-wrap:wrap;justify-content:space-between;gap:18px}
+
+/* ── entrance choreography ── */
+.rise{opacity:0;transform:translateY(18px);animation:rise .85s cubic-bezier(.2,.75,.25,1) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+.d1{animation-delay:.05s}.d2{animation-delay:.16s}.d3{animation-delay:.28s}
+.d4{animation-delay:.40s}.d5{animation-delay:.52s}.d6{animation-delay:.64s}
+
+.reveal{opacity:0;transform:translateY(22px);transition:opacity .8s cubic-bezier(.2,.75,.25,1),transform .8s cubic-bezier(.2,.75,.25,1)}
+.reveal.in{opacity:1;transform:none}
+
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .rise,.reveal{opacity:1;transform:none}
+  .erase::after{transform:scaleX(1)}
+}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <span class="mark">GS&#8209;LoRA<b>++</b></span>
+    <nav class="topnav">
+      <a href="#abstract">Abstract</a>
+      <a href="#method">Method</a>
+      <a href="#results">Results</a>
+      <a href="#code">Code</a>
+      <a href="#cite">Cite</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="venue rise d1">
+      <span class="tag hot">TPAMI 2026</span>
+      <span class="tag">CVPR 2024</span>
+      <span class="tag">Continual Forgetting</span>
+    </div>
+
+    <h1 class="rise d2">Practical Continual <span class="erase">Forgetting</span> for Pre&#8209;trained Vision Models</h1>
+
+    <p class="authors rise d3">
+      <a href="https://scholar.google.com/citations?user=Gs22F0UAAAAJ&amp;hl=zh-CN">Hongbo Zhao</a>,
+      <a href="https://impression2805.github.io/">Fei Zhu</a>,
+      Bolin Ni,
+      <a href="https://zhufengx.github.io/">Feng Zhu</a>,
+      <a href="https://scholar.google.com/citations?hl=zh-CN&amp;user=5hti_r0AAAAJ">Gaofeng Meng</a>,
+      <a href="https://scholar.google.com/citations?hl=zh-CN&amp;user=qxWfV6cAAAAJ">Zhaoxiang Zhang</a>
+    </p>
+    <p class="affil rise d3">IEEE Transactions on Pattern Analysis and Machine Intelligence, 2026 &nbsp;·&nbsp; extends the CVPR&nbsp;2024 paper <em>Continual Forgetting for Pre-trained Vision Models</em></p>
+
+    <div class="actions rise d4">
+      <a class="btn primary" href="https://arxiv.org/abs/2501.09705">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        Paper (TPAMI)
+      </a>
+      <a class="btn" href="https://arxiv.org/abs/2403.11530">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        CVPR 2024
+      </a>
+      <a class="btn" href="https://github.com/bjzhb666/GS-LoRA">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.9 1.2 1.9 1.2 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.4 4.7 18.4 5 18.4 5c.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+        Code
+      </a>
+      <a class="btn" href="https://www.youtube.com/watch?v=yigUY5v1Rgc">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m10 8 6 4-6 4z"/><rect x="2" y="4" width="20" height="16" rx="3"/></svg>
+        Video
+      </a>
+      <a class="btn" href="https://www.bilibili.com/video/BV1wi421C7PQ/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="15" rx="3"/><path d="m7 2 3 4M17 2l-3 4M8 13h.01M16 13h.01"/></svg>
+        Bilibili
+      </a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ── teaser ── -->
+<section id="teaser" style="padding-top:0;border-top:none">
+  <div class="wrap">
+    <figure class="rise d5">
+      <div class="fig"><img src="static/teaser.png" alt="Erasure requests arrive as a sequence; private and toxic knowledge is removed task by task while the rest of the model is preserved." /></div>
+      <figcaption><b>Continual forgetting.</b> Erasure requests arrive at any time, from users and from model owners, and form a sequence. At each task the model must drop the requested knowledge &mdash; private identities, toxic or wrong information &mdash; while everything it has already learned stays intact.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ── abstract ── -->
+<section id="abstract">
+  <div class="wrap">
+    <div class="sechead reveal"><span class="num">01</span><h2>Abstract</h2></div>
+
+    <div class="abstract-grid">
+      <div>
+        <p class="lede drop reveal">For privacy and security concerns, the need to erase unwanted information from pre-trained vision models is becoming evident nowadays. In real-world scenarios, erasure requests originate at any time from both users and model owners, and these requests usually form a sequence. Therefore, under such a setting, selective information is expected to be continuously removed from a pre-trained model while maintaining the rest. We define this problem as <strong>continual forgetting</strong> and identify three key challenges.</p>
+        <p class="lede reveal" style="margin-top:1.1em">To address them, we first propose <strong>Group Sparse LoRA (GS-LoRA)</strong>. Specifically, towards (i), we introduce LoRA modules to fine-tune the FFN layers in Transformer blocks for each forgetting task independently, and towards (ii), a simple group sparse regularization is adopted, enabling automatic selection of specific LoRA groups and zeroing out the others. To further extend GS-LoRA to more practical scenarios, we incorporate prototype information as additional supervision and introduce a more practical approach, <strong>GS-LoRA++</strong>. For each forgotten class, we move the logits away from its original prototype. For the remaining classes, we pull the logits closer to their respective prototypes. We conduct extensive experiments on face recognition, object detection, and image classification and demonstrate that our method manages to forget specific classes with minimal impact on other classes.</p>
+      </div>
+
+      <aside class="rail reveal">
+        <span class="eyebrow">Three challenges</span>
+        <div class="chal"><span class="i">(i)</span><p><b>Delete efficiently.</b> Unwanted knowledge has to go, and go quickly.</p></div>
+        <div class="chal"><span class="i">(ii)</span><p><b>Disturb nothing else.</b> The forgetting procedure must barely touch the remaining knowledge.</p></div>
+        <div class="chal"><span class="i">(iii)</span><p><b>Survive scarce data.</b> In practice the training samples may be few, or partially missing altogether.</p></div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ── method ── -->
+<section id="method">
+  <div class="wrap">
+    <div class="sechead reveal"><span class="num">02</span><h2>Method</h2></div>
+
+    <figure class="reveal">
+      <div class="fig"><img src="static/method.png" alt="Left: LoRA modules on the FFN linears of each Transformer block, grouped per block, selected by group sparse regularization. Right: selective forgetting and knowledge retention with prototype regularization." /></div>
+      <figcaption>
+        <b>Left.</b> LoRA modules are added to the Linear layers of the FFN in each Transformer block, and the modules inside one block are treated as a single <em>group</em>. Group sparse regularization selects a handful of groups to modify and zeroes the rest; the pre-trained model stays frozen.
+        <b>Right.</b> Selective forgetting and knowledge retention. The frozen original model supplies a prototype per class: logits of forgotten classes are pushed away from their prototype, logits of remaining classes are pulled towards theirs.
+      </figcaption>
+    </figure>
+
+    <div class="losses reveal">
+      <div class="loss">
+        <div class="sym">&#8466;<sub>data</sub></div>
+        <h3>Selective forgetting</h3>
+        <p>A bounded objective raises the cross-entropy on the forget set only as far as a threshold, so the model stops destroying itself once the knowledge is gone, while the remain set keeps its ordinary loss.</p>
+      </div>
+      <div class="loss">
+        <div class="sym">&#8466;<sub>structure</sub></div>
+        <h3>Group sparse selection</h3>
+        <p>A group lasso over the LoRA groups drives whole blocks to exactly zero, so each erasure request touches only the few Transformer blocks it actually needs.</p>
+      </div>
+      <div class="loss">
+        <div class="sym">&#8466;<sub>pro</sub></div>
+        <h3>Prototype regularization</h3>
+        <p>Class prototypes from the frozen original model give supervision that does not depend on having many samples &mdash; which is what makes GS-LoRA++ hold up in the few-shot and missing-data regimes.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── results ── -->
+<section id="results">
+  <div class="wrap">
+    <div class="sechead reveal"><span class="num">03</span><h2>Results</h2></div>
+
+    <div class="stats reveal">
+      <div class="stat">
+        <div class="v">1.28<span style="font-size:.5em">%</span></div>
+        <div class="k">Tunable parameters</div>
+        <div class="n">against 99.73% for the fine-tuning baselines</div>
+      </div>
+      <div class="stat">
+        <div class="v">0.00<span style="font-size:.5em">%</span></div>
+        <div class="k">Accuracy on forgotten classes</div>
+        <div class="n">the requested knowledge is actually gone</div>
+      </div>
+      <div class="stat">
+        <div class="v keep">&ge;72.4<span style="font-size:.5em">%</span></div>
+        <div class="k">Accuracy retained</div>
+        <div class="n">across all four continual tasks, 20 face classes dropped per task</div>
+      </div>
+      <div class="stat">
+        <div class="v keep">86.2<span style="font-size:.5em">%</span></div>
+        <div class="k">Retained on ImageNet-100</div>
+        <div class="n">ViT-B/16, first task, 20 classes forgotten</div>
+      </div>
+    </div>
+
+    <div class="tablewrap reveal" style="margin-top:38px">
+      <table>
+        <caption>Continual forgetting on face recognition, first of four tasks (100&ndash;20): 20 classes forgotten, 80 retained. <em>H</em> is the harmonic mean of the accuracy drop on the forgotten classes and the accuracy kept on the remaining ones. <em>Retrain</em> is given the same epoch budget as the other methods.</caption>
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th class="down">Tunable</th>
+            <th class="up">H</th>
+            <th class="up">Acc<sub>r</sub></th>
+            <th class="down">Acc<sub>f</sub></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>Pre-trained</td><td>&mdash;</td><td>&mdash;</td><td>74.31</td><td>74.65</td></tr>
+          <tr><td>EWC</td><td>99.73%</td><td>67.71</td><td>61.95</td><td>0.00</td></tr>
+          <tr><td>LwF</td><td>99.73%</td><td>69.43</td><td>65.04</td><td>0.21</td></tr>
+          <tr><td>DER++</td><td>99.73%</td><td>70.01</td><td>65.90</td><td>0.00</td></tr>
+          <tr><td>SCRUB</td><td>99.73%</td><td>70.39</td><td>66.59</td><td>0.00</td></tr>
+          <tr><td>Retrain</td><td>100.0%</td><td>17.29</td><td>9.77</td><td>0.00</td></tr>
+          <tr class="ours"><td>GS-LoRA</td><td>1.28%</td><td>74.40</td><td>74.16</td><td>0.00</td></tr>
+          <tr class="ours"><td>GS-LoRA++</td><td>1.28%</td><td>73.97</td><td>74.16</td><td>0.00</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note reveal">Full tables &mdash; single-step forgetting, the 4-task continual setting, ImageNet-100, few-shot, and the missing-training-data setting &mdash; are in the paper. GS-LoRA++ is the variant that holds up when only a handful of samples per class are available.</p>
+  </div>
+</section>
+
+<!-- ── code ── -->
+<section id="code">
+  <div class="wrap">
+    <div class="sechead reveal"><span class="num">04</span><h2>Code</h2></div>
+    <div class="grid2">
+      <div class="reveal">
+        <div class="codehead"><span class="eyebrow">Install</span></div>
+<pre><span class="c"># clone and install</span>
+git clone https://github.com/bjzhb666/GS-LoRA.git
+cd GS-LoRA
+pip install -e <span class="f">'.[dev]'</span>
+
+<span class="c"># verify (no dataset needed)</span>
+pytest -q</pre>
+      </div>
+      <div class="reveal">
+        <div class="codehead"><span class="eyebrow">Forget</span></div>
+<pre><span class="c"># single step: --num_tasks 1</span>
+<span class="c"># continual:   --num_tasks 9</span>
+<span class="c"># missing class: --open_cls_num 10</span>
+python -m gslora.tools.train_forget \
+  -d casia100 -n VIT -head CosFace \
+  --method <span class="f">gslora</span> --num_tasks 9 \
+  --lora_rank 8 --grouping block \
+  -r &lt;pretrained.pth&gt; --outdir ./exps/cl</pre>
+      </div>
+    </div>
+    <p class="note reveal">One entry point covers every setting; <code>--method</code> also selects the baselines (<code>l2</code>, <code>ewc</code>, <code>mas</code>, <code>lwf</code>, <code>der</code>, <code>fdr</code>, <code>scrub</code>, <code>lirf</code>, <code>retrain</code>). See the repository README for dataset preparation.</p>
+  </div>
+</section>
+
+<!-- ── cite ── -->
+<section id="cite">
+  <div class="wrap">
+    <div class="sechead reveal"><span class="num">05</span><h2>Citation</h2></div>
+    <div class="reveal">
+      <div class="codehead">
+        <span class="eyebrow">BibTeX</span>
+        <button class="copy" id="copyBtn" type="button">Copy</button>
+      </div>
+<pre id="bib">@article{zhao2025practical,
+  title   = {Practical Continual Forgetting for Pre-trained Vision Models},
+  author  = {Zhao, Hongbo and Zhu, Fei and Ni, Bolin and Zhu, Feng and
+             Meng, Gaofeng and Zhang, Zhaoxiang},
+  journal = {IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  year    = {2026}
+}
+
+@inproceedings{zhao2024continual,
+  title     = {Continual Forgetting for Pre-trained Vision Models},
+  author    = {Zhao, Hongbo and Ni, Bolin and Wang, Haochen and Fan, Junsong and
+               Zhu, Fei and Wang, Yuxi and Chen, Yuntao and Meng, Gaofeng and
+               Zhang, Zhaoxiang},
+  booktitle = {CVPR},
+  year      = {2024}
+}</pre>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap footrow">
+    <span>Released under the <a href="https://github.com/bjzhb666/GS-LoRA/blob/master/LICENSE">MIT License</a>. Built on <a href="https://github.com/zhongyy/Face-Transformer">Face-Transformer</a>.</span>
+    <span>Questions? Open an <a href="https://github.com/bjzhb666/GS-LoRA/issues">issue</a>.</span>
+  </div>
+</footer>
+
+<script>
+// scroll reveals
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }
+}, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+
+document.querySelectorAll('.reveal').forEach((el, i) => {
+  el.style.transitionDelay = (i % 4) * 70 + 'ms';
+  io.observe(el);
+});
+
+// copy bibtex
+const btn = document.getElementById('copyBtn');
+const bib = document.getElementById('bib');
+
+function legacyCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:absolute;left:-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+function selectBib() {
+  const r = document.createRange();
+  r.selectNodeContents(bib);
+  const s = window.getSelection();
+  s.removeAllRanges();
+  s.addRange(r);
+}
+
+btn.addEventListener('click', async () => {
+  const text = bib.innerText;
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    }
+  } catch {}
+  if (!ok) ok = legacyCopy(text);
+  if (ok) {
+    btn.textContent = 'Copied';
+    btn.classList.add('done');
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1800);
+  } else {
+    selectBib();                       // last resort: select it for the user
+    btn.textContent = 'Selected';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+  }
+});
+</script>
+
+</body>
+</html>
