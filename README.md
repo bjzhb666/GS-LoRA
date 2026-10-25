@@ -43,8 +43,6 @@ Experiment tracking with Weights & Biases is **optional** (`pip install -e '.[wa
 then `--tracker wandb`). By default metrics are appended to
 `<outdir>/metrics.jsonl`, so a run never fails because wandb is unavailable.
 
-`mxnet` is no longer a dependency.
-
 > **CUDA note.** `torch>=2.4` from PyPI ships CUDA 12 kernels and needs a
 > driver ≥ 525. On an older driver (e.g. CUDA 11.8) install a matching build,
 > e.g. `pip install torch==2.4.1 --index-url https://download.pytorch.org/whl/cu118`.
@@ -53,7 +51,7 @@ then `--tracker wandb`). By default metrics are appended to
 ### Verify the install
 
 ```bash
-.venv/bin/python -m pytest -q      # 139 tests, ~40 s, no dataset needed
+.venv/bin/python -m pytest -q      # 156 tests, ~40 s, no dataset needed
 ```
 
 ### Prepare the datasets
@@ -85,7 +83,32 @@ data/
     ├── imagenet_class_index.json
     ├── imagenet_folder_names.txt
     ├── train/
-    └── test/
+    ├── test/
+    └── imagenet_val_missing/      # optional, see below
+```
+
+`imagenet_val_missing/` is optional. If present, it should hold validation
+images for ImageNet-1k classes that are **not** among the 100, one folder per
+class named with its WordNet id. When it exists, an ImageNet run additionally
+reports accuracy on those held-out classes before and after each forgetting
+task, which measures how much editing the 100 classes disturbs the other 900.
+
+### Repository layout
+
+```
+gslora/
+├── config.py        one typed Config shared by every entry point
+├── losses.py        L_data, L_structure, L_pro and the baseline terms
+├── lora_utils.py    LoRA grouping, group norms, re-initialisation
+├── prototypes.py    class prototypes for GS-LoRA++
+├── data/            class splits, few-shot sampling, dataloaders
+├── models/          ViT_face, ViTs_face, torchvision ViT-B/16, heads
+├── engine/          the GS-LoRA step, evaluation, batch pairing
+├── methods/         LIRF, SCRUB, LwF, DER/DER++, FDR, EWC/MAS/L2, retrain
+└── tools/           train_forget.py, pretrain.py, evaluate.py
+tests/               156 tests, no dataset required
+scripts/             ready-made experiment configurations
+docs/                project page (GitHub Pages source)
 ```
 
 ## Pre-train a Face Transformer
@@ -159,18 +182,18 @@ Full flag list: `python -m gslora.tools.train_forget --help`.
 If you find this project useful in your research, please consider citing:
 
 ```
-@article{zhao2024continual,
+@inproceedings{zhao2024continual,
   title={Continual Forgetting for Pre-trained Vision Models},
   author={Zhao, Hongbo and Ni, Bolin and Wang, Haochen and Fan, Junsong and Zhu, Fei and Wang, Yuxi and Chen, Yuntao and Meng, Gaofeng and Zhang, Zhaoxiang},
-  journal={arXiv preprint arXiv:2403.11530},
+  booktitle={CVPR},
   year={2024}
 }
 
 @article{zhao2025practical,
   title={Practical Continual Forgetting for Pre-trained Vision Models},
   author={Zhao, Hongbo and Zhu, Fei and Ni, Bolin and Zhu, Feng and Meng, Gaofeng and Zhang, Zhaoxiang},
-  journal={arXiv preprint arXiv:2501.09705},
-  year={2025}
+  journal={IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  year={2026}
 }
 
 ```
